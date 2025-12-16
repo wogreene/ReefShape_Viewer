@@ -87,8 +87,8 @@ map.on("load", async () => {
     id: "site-labels",
     type: "symbol",
     source: "sites",
-    minzoom: 0,
-    maxzoom: 14,   // hide reef labels once zoomed in
+    minzoom: 14,
+    maxzoom: 18,   // hide reef labels once zoomed in
 
     layout: {
       "text-field": ["get", "name"],
