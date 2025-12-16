@@ -4,8 +4,14 @@
     {
       "type": "Feature",
       "properties": {
-        "id": "pumpkin",
-        "name": "Pumpkin Reef",
+        "id": "test",
+        "name": "Test Reef",
+
+        "bounds": [
+          -77.3215, 25.0792,
+          -77.3198, 25.0811
+        ],
+
         "timepoints": {
           "2022": "https://www.dropbox.com/s/XXXX/pumpkin_2022_cog.tif?raw=1",
           "2023": "https://www.dropbox.com/s/YYYY/pumpkin_2023_cog.tif?raw=1"
@@ -13,7 +19,7 @@
       },
       "geometry": {
         "type": "Point",
-        "coordinates": [-77.32, 25.08]
+        "coordinates": [-77.3206, 25.0801]
       }
     }
   ]
