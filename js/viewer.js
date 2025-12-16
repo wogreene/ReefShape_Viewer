@@ -1,12 +1,7 @@
 // js/viewer.js
 
-// TiTiler XYZ endpoint (WebMercator)
 const TILER_BASE =
   "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=";
-
-// Controls how deep TiTiler is allowed to generate *new* tiles
-// This should roughly correspond to the native resolution of the COG
-const REEF_TILE_MAX_ZOOM = 18;
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
@@ -14,7 +9,7 @@ const reefId = params.get("id");
 const map = new maplibregl.Map({
   container: "map",
 
-  // Allow very deep zoom for mm-scale inspection (overscaling)
+  // Allow deep overscaling for mm-scale inspection
   minZoom: 0,
   maxZoom: 32,
 
@@ -44,7 +39,7 @@ const map = new maplibregl.Map({
   }
 });
 
-// Scale bar (critical for mm-scale work)
+// Scale bar (important for mm-scale work)
 map.addControl(
   new maplibregl.ScaleControl({
     maxWidth: 140,
@@ -68,7 +63,6 @@ async function init() {
   const { timepoints, bounds } = feature.properties;
   const years = Object.keys(timepoints);
 
-  // Zoom to reef bounds immediately
   map.fitBounds(bounds, {
     padding: 40,
     duration: 0
@@ -97,11 +91,8 @@ function addRaster(cogUrl) {
     tiles: [
       TILER_BASE + encodeURIComponent(cogUrl)
     ],
-    tileSize: 256,
-
-    // 🔑 This limits tile REQUESTS, not visual zoom
-    minzoom: 0,
-    maxzoom: REEF_TILE_MAX_ZOOM
+    tileSize: 256
+    // 🔑 NO maxzoom here
   });
 
   map.addLayer({
@@ -111,8 +102,7 @@ function addRaster(cogUrl) {
     paint: {
       "raster-opacity": 0.95,
 
-      // 🔑 Critical for honest mm-scale visualization
-      // Prevents blurry interpolation when overscaling
+      // Honest pixel behavior when overscaling
       "raster-resampling": "nearest"
     }
   });
