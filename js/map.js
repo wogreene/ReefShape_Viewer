@@ -45,8 +45,8 @@ const STYLE = {
 
 const map = new maplibregl.Map({
   container: "map",
-  center: [-77.32, 25.08],
-  zoom: 7,
+  center: [-77.21, 25.42],
+  zoom: 8,
   minZoom: 0,
   maxZoom: 26,
   style: STYLE
@@ -87,12 +87,12 @@ map.on("load", async () => {
     id: "site-labels",
     type: "symbol",
     source: "sites",
-    minzoom: 14,
+    minzoom: 6,
     maxzoom: 18,   // hide reef labels once zoomed in
 
     layout: {
       "text-field": ["get", "name"],
-      "text-size": 12,
+      "text-size": 14,
       "text-offset": [0, 1.2],
       "text-anchor": "top"
     },
