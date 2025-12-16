@@ -4,22 +4,18 @@
     {
       "type": "Feature",
       "properties": {
-        "id": "test",
-        "name": "Test Reef",
+        "id": "bullrun",
+        "name": "Bull Run",
 
-        "bounds": [
-          -77.3215, 25.0792,
-          -77.3198, 25.0811
-        ],
+        "bounds": [-79.24807271641542,25.4533289508983,-79.24773405382061,25.45364938850446],
 
         "timepoints": {
-          "2022": "https://www.dropbox.com/s/XXXX/pumpkin_2022_cog.tif?raw=1",
-          "2023": "https://www.dropbox.com/s/YYYY/pumpkin_2023_cog.tif?raw=1"
+          "20251103": "https://dl.dropboxusercontent.com/scl/fi/6o939vhxcpxtrw4qcg9xx/BullRun_20251103_cog.tif?rlkey=cz07p9uq4p4al5ww5wzdf4ick"
         }
       },
       "geometry": {
         "type": "Point",
-        "coordinates": [-77.3206, 25.0801]
+        "coordinates": [-79.247, 25.4535]
       }
     }
   ]
