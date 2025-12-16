@@ -1,45 +1,36 @@
 // js/viewer.js
 
 const TILER_BASE =
-  "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?tileSize=512&url=";
+  "https://reef-titiler.onrender.com/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?tileSize=512&url=";
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
 
 const map = new maplibregl.Map({
   container: "map",
-
-  // Allow deep zoom for mm-scale inspection
   minZoom: 0,
   maxZoom: 32,
-
   style: {
     version: 8,
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
     sources: {
       "esri-satellite": {
         type: "raster",
         tiles: [
           "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
         ],
-        tileSize: 256,
-        maxzoom: 18
+        tileSize: 256
       }
     },
     layers: [
       {
         id: "satellite",
         type: "raster",
-        source: "esri-satellite",
-        paint: {
-          "raster-resampling": "linear"
-        }
+        source: "esri-satellite"
       }
     ]
   }
 });
 
-// Scale bar
 map.addControl(
   new maplibregl.ScaleControl({
     maxWidth: 140,
@@ -50,10 +41,7 @@ map.addControl(
 
 async function init() {
   const sites = await fetch("data/sites.geojson").then(r => r.json());
-
-  const feature = sites.features.find(
-    f => f.properties.id === reefId
-  );
+  const feature = sites.features.find(f => f.properties.id === reefId);
 
   if (!feature) {
     alert("Reef not found");
@@ -63,69 +51,31 @@ async function init() {
   const { timepoints, bounds } = feature.properties;
   const years = Object.keys(timepoints);
 
-  // Prevent accidental global panning
-  map.setMaxBounds([
-    [bounds[0], bounds[1]],
-    [bounds[2], bounds[3]]
-  ]);
-
-  // Zoom to reef bounds
-  map.fitBounds(bounds, {
-    padding: 40,
-    duration: 0
-  });
-
-  const select = document.getElementById("timepointSelect");
-  years.forEach(y => {
-    const opt = document.createElement("option");
-    opt.value = y;
-    opt.textContent = y;
-    select.appendChild(opt);
-  });
+  map.fitBounds(bounds, { padding: 40, duration: 0 });
 
   map.on("load", () => {
-    addRaster(timepoints[years[0]], bounds);
-    map.setLayerZoomRange("satellite", 0, 18);
+    map.addSource("reef", {
+      type: "raster",
+      tiles: [TILER_BASE + encodeURIComponent(timepoints[years[0]])],
+      tileSize: 512,
+
+      // 🔑 realistic data zoom
+      maxzoom: 30,
+
+      // 🔑 prevent global tile spam
+      bounds: bounds
+    });
+
+    map.addLayer({
+      id: "reef-layer",
+      type: "raster",
+      source: "reef",
+      paint: {
+        "raster-resampling": "nearest",
+        "raster-fade-duration": 0
+      }
+    });
   });
-
-  select.onchange = () => {
-    switchTimepoint(timepoints[select.value]);
-  };
-}
-
-function addRaster(cogUrl, bounds) {
-  map.addSource("reef", {
-    type: "raster",
-    tiles: [
-      TILER_BASE + encodeURIComponent(cogUrl)
-    ],
-
-    tileSize: 512,
-
-    // 🔑 THIS IS THE MISSING LINE
-    // Allows MapLibre to request deeper tiles
-    maxzoom: 30,
-
-    // Prevent global tile spam
-    bounds: bounds
-  });
-
-  map.addLayer({
-    id: "reef-layer",
-    type: "raster",
-    source: "reef",
-    paint: {
-      "raster-opacity": 0.95,
-      "raster-resampling": "nearest",
-      "raster-fade-duration": 0
-    }
-  });
-}
-
-function switchTimepoint(cogUrl) {
-  map.getSource("reef").setTiles([
-    TILER_BASE + encodeURIComponent(cogUrl)
-  ]);
 }
 
 init();
