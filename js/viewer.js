@@ -10,6 +10,7 @@ const map = new maplibregl.Map({
   container: "map",
   center: [-77.32, 25.08],
   zoom: 16,
+
   style: {
     version: 8,
     sources: {
@@ -65,7 +66,6 @@ async function init() {
     select.appendChild(opt);
   });
 
-  // Zoom to reef location
   const [lon, lat] = feature.geometry.coordinates;
   map.setCenter([lon, lat]);
 
