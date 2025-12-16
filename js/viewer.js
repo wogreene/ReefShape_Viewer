@@ -1,18 +1,26 @@
 // js/viewer.js
 
+// TiTiler XYZ endpoint (WebMercator)
 const TILER_BASE =
   "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=";
+
+// Controls how deep TiTiler is allowed to generate *new* tiles
+// This should roughly correspond to the native resolution of the COG
+const REEF_TILE_MAX_ZOOM = 18;
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
 
 const map = new maplibregl.Map({
   container: "map",
+
+  // Allow very deep zoom for mm-scale inspection (overscaling)
   minZoom: 0,
-  maxZoom: 30,
+  maxZoom: 32,
 
   style: {
     version: 8,
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
     sources: {
       "esri-satellite": {
         type: "raster",
@@ -36,10 +44,10 @@ const map = new maplibregl.Map({
   }
 });
 
-// Scale bar (critical at mm-scale zoom)
+// Scale bar (critical for mm-scale work)
 map.addControl(
   new maplibregl.ScaleControl({
-    maxWidth: 120,
+    maxWidth: 140,
     unit: "metric"
   }),
   "bottom-right"
@@ -47,6 +55,7 @@ map.addControl(
 
 async function init() {
   const sites = await fetch("data/sites.geojson").then(r => r.json());
+
   const feature = sites.features.find(
     f => f.properties.id === reefId
   );
@@ -59,7 +68,7 @@ async function init() {
   const { timepoints, bounds } = feature.properties;
   const years = Object.keys(timepoints);
 
-  // Zoom to mosaic bounds immediately
+  // Zoom to reef bounds immediately
   map.fitBounds(bounds, {
     padding: 40,
     duration: 0
@@ -88,7 +97,11 @@ function addRaster(cogUrl) {
     tiles: [
       TILER_BASE + encodeURIComponent(cogUrl)
     ],
-    tileSize: 256
+    tileSize: 256,
+
+    // 🔑 This limits tile REQUESTS, not visual zoom
+    minzoom: 0,
+    maxzoom: REEF_TILE_MAX_ZOOM
   });
 
   map.addLayer({
@@ -96,7 +109,11 @@ function addRaster(cogUrl) {
     type: "raster",
     source: "reef",
     paint: {
-      "raster-opacity": 0.9
+      "raster-opacity": 0.95,
+
+      // 🔑 Critical for honest mm-scale visualization
+      // Prevents blurry interpolation when overscaling
+      "raster-resampling": "nearest"
     }
   });
 }
