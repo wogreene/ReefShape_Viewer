@@ -38,7 +38,7 @@ const map = new maplibregl.Map({
         type: "raster",
         source: "esri-satellite",
         paint: {
-          "raster-resampling": "bilinear"
+          "raster-resampling": "linear"
         }
       },
       {
