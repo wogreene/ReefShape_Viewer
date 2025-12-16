@@ -8,8 +8,8 @@ const reefId = params.get("id");
 
 const map = new maplibregl.Map({
   container: "map",
-  center: [-77.32, 25.08],
-  zoom: 16,
+  minZoom: 0,
+  maxZoom: 26,
 
   style: {
     version: 8,
@@ -19,30 +19,31 @@ const map = new maplibregl.Map({
         tiles: [
           "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
         ],
-        tileSize: 256
-      },
-      "esri-labels": {
-        type: "raster",
-        tiles: [
-          "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-        ],
-        tileSize: 256
+        tileSize: 256,
+        maxzoom: 19
       }
     },
     layers: [
       {
         id: "satellite",
         type: "raster",
-        source: "esri-satellite"
-      },
-      {
-        id: "labels",
-        type: "raster",
-        source: "esri-labels"
+        source: "esri-satellite",
+        paint: {
+          "raster-resampling": "nearest"
+        }
       }
     ]
   }
 });
+
+// Scale bar (critical at mm-scale zoom)
+map.addControl(
+  new maplibregl.ScaleControl({
+    maxWidth: 120,
+    unit: "metric"
+  }),
+  "bottom-right"
+);
 
 async function init() {
   const sites = await fetch("data/sites.geojson").then(r => r.json());
@@ -55,8 +56,14 @@ async function init() {
     return;
   }
 
-  const timepoints = feature.properties.timepoints;
+  const { timepoints, bounds } = feature.properties;
   const years = Object.keys(timepoints);
+
+  // Zoom to mosaic bounds immediately
+  map.fitBounds(bounds, {
+    padding: 40,
+    duration: 0
+  });
 
   const select = document.getElementById("timepointSelect");
   years.forEach(y => {
@@ -65,9 +72,6 @@ async function init() {
     opt.textContent = y;
     select.appendChild(opt);
   });
-
-  const [lon, lat] = feature.geometry.coordinates;
-  map.setCenter([lon, lat]);
 
   map.on("load", () => {
     addRaster(timepoints[years[0]]);
