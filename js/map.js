@@ -1,26 +1,40 @@
+// js/map.js
+
 const map = new maplibregl.Map({
   container: "map",
-  style: {
-  version: 8,
-  sources: {
-    "esri-satellite": {
-      type: "raster",
-      tiles: [
-        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-      ],
-      tileSize: 256
-    }
-  },
-  layers: [
-    {
-      id: "esri-satellite",
-      type: "raster",
-      source: "esri-satellite"
-    }
-  ]
-}
   center: [-77.32, 25.08],
-  zoom: 7
+  zoom: 7,
+  style: {
+    version: 8,
+    sources: {
+      "esri-satellite": {
+        type: "raster",
+        tiles: [
+          "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        ],
+        tileSize: 256
+      },
+      "esri-labels": {
+        type: "raster",
+        tiles: [
+          "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+        ],
+        tileSize: 256
+      }
+    },
+    layers: [
+      {
+        id: "satellite",
+        type: "raster",
+        source: "esri-satellite"
+      },
+      {
+        id: "labels",
+        type: "raster",
+        source: "esri-labels"
+      }
+    ]
+  }
 });
 
 map.on("load", async () => {
