@@ -2,7 +2,7 @@
 
 // TiTiler XYZ endpoint (WebMercator)
 const TILER_BASE =
-  "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?tileSize=512&url=";
+  "https://reef-titiler.onrender.com/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?tileSize=512&url=";
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
