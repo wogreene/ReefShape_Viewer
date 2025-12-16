@@ -1,7 +1,7 @@
 // js/viewer.js
 
 const TILER_BASE =
-  "https://reef-titiler.onrender.com/cog/tiles/{z}/{x}/{y}.png?url=";
+  "http://localhost:8000/cog/tiles/{z}/{x}/{y}.png?url=";
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
