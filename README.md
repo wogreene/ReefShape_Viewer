@@ -5,6 +5,7 @@ photomosaics via MapLibre and Cloud Optimized GeoTIFFs (COGs).
 
 WORK IN PROGRESS - VERY EARLY STAGES OF DEVELOPMENT
 
+
 ## Architecture
 - Frontend: GitHub Pages (static)
 - Map: MapLibre GL JS
