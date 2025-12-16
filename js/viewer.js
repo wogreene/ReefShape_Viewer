@@ -3,14 +3,17 @@
 const TILER_BASE =
   "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=";
 
+// 🔑 Native resolution of your COG (~0.5 mm)
+const REEF_NATIVE_MAX_ZOOM = 28;
+
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
 
 const map = new maplibregl.Map({
   container: "map",
-
-  // Allow deep overscaling for mm-scale inspection
   minZoom: 0,
+
+  // Allow overscaling beyond native resolution
   maxZoom: 32,
 
   style: {
@@ -39,7 +42,7 @@ const map = new maplibregl.Map({
   }
 });
 
-// Scale bar (important for mm-scale work)
+// Scale bar (critical at mm scale)
 map.addControl(
   new maplibregl.ScaleControl({
     maxWidth: 140,
@@ -50,7 +53,6 @@ map.addControl(
 
 async function init() {
   const sites = await fetch("data/sites.geojson").then(r => r.json());
-
   const feature = sites.features.find(
     f => f.properties.id === reefId
   );
@@ -91,8 +93,10 @@ function addRaster(cogUrl) {
     tiles: [
       TILER_BASE + encodeURIComponent(cogUrl)
     ],
-    tileSize: 256
-    // 🔑 NO maxzoom here
+    tileSize: 256,
+
+    // 🔑 THIS is the missing link
+    maxzoom: REEF_NATIVE_MAX_ZOOM
   });
 
   map.addLayer({
@@ -102,7 +106,7 @@ function addRaster(cogUrl) {
     paint: {
       "raster-opacity": 0.95,
 
-      // Honest pixel behavior when overscaling
+      // Honest pixel behavior
       "raster-resampling": "nearest"
     }
   });
