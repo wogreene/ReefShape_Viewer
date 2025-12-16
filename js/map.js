@@ -1,53 +1,55 @@
 // js/map.js
 
+const STYLE = {
+  version: 8,
+
+  // REQUIRED for any text labels
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+
+  sources: {
+    "esri-satellite": {
+      type: "raster",
+      tiles: [
+        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      tileSize: 256,
+      maxzoom: 18
+    },
+    "esri-labels": {
+      type: "raster",
+      tiles: [
+        "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+      ],
+      tileSize: 256,
+      maxzoom: 18
+    }
+  },
+
+  layers: [
+    {
+      id: "satellite",
+      type: "raster",
+      source: "esri-satellite",
+      paint: {
+        "raster-resampling": "linear"
+      }
+    },
+    {
+      id: "basemap-labels",
+      type: "raster",
+      source: "esri-labels",
+      maxzoom: 13   // hide basemap labels when zoomed in
+    }
+  ]
+};
+
 const map = new maplibregl.Map({
   container: "map",
   center: [-77.32, 25.08],
   zoom: 7,
   minZoom: 0,
-  maxZoom: 30,
-
-  style: {
-    version: 8,
-
-    // REQUIRED for text labels
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-
-    sources: {
-      "esri-satellite": {
-        type: "raster",
-        tiles: [
-          "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-        ],
-        tileSize: 256,
-        maxzoom: 18
-      },
-      "esri-labels": {
-        type: "raster",
-        tiles: [
-          "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-        ],
-        tileSize: 256,
-        maxzoom: 18
-      }
-    },
-
-    layers: [
-      {
-        id: "satellite",
-        type: "raster",
-        source: "esri-satellite",
-        paint: {
-          "raster-resampling": "linear"
-        }
-      },
-      {
-        id: "labels",
-        type: "raster",
-        source: "esri-labels"
-      }
-    ]
-  }
+  maxZoom: 26,
+  style: STYLE
 });
 
 // Scale bar
@@ -80,11 +82,14 @@ map.on("load", async () => {
     }
   });
 
-  // Reef labels (NOW WORKS)
+  // Reef labels (auto-hide at high zoom)
   map.addLayer({
     id: "site-labels",
     type: "symbol",
     source: "sites",
+    minzoom: 0,
+    maxzoom: 14,   // hide reef labels once zoomed in
+
     layout: {
       "text-field": ["get", "name"],
       "text-size": 12,
