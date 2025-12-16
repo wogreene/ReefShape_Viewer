@@ -1,3 +1,5 @@
+// js/viewer.js
+
 const TILER_BASE =
   "https://YOUR-TITILER-APP/cog/tiles/{z}/{x}/{y}.png?url=";
 
@@ -6,27 +8,39 @@ const reefId = params.get("id");
 
 const map = new maplibregl.Map({
   container: "map",
-  style: {
-  version: 8,
-  sources: {
-    "esri-satellite": {
-      type: "raster",
-      tiles: [
-        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-      ],
-      tileSize: 256
-    }
-  },
-  layers: [
-    {
-      id: "esri-satellite",
-      type: "raster",
-      source: "esri-satellite"
-    }
-  ]
-}
   center: [-77.32, 25.08],
-  zoom: 16
+  zoom: 16,
+  style: {
+    version: 8,
+    sources: {
+      "esri-satellite": {
+        type: "raster",
+        tiles: [
+          "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+        ],
+        tileSize: 256
+      },
+      "esri-labels": {
+        type: "raster",
+        tiles: [
+          "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+        ],
+        tileSize: 256
+      }
+    },
+    layers: [
+      {
+        id: "satellite",
+        type: "raster",
+        source: "esri-satellite"
+      },
+      {
+        id: "labels",
+        type: "raster",
+        source: "esri-labels"
+      }
+    ]
+  }
 });
 
 async function init() {
@@ -51,6 +65,10 @@ async function init() {
     select.appendChild(opt);
   });
 
+  // Zoom to reef location
+  const [lon, lat] = feature.geometry.coordinates;
+  map.setCenter([lon, lat]);
+
   map.on("load", () => {
     addRaster(timepoints[years[0]]);
   });
@@ -63,14 +81,19 @@ async function init() {
 function addRaster(cogUrl) {
   map.addSource("reef", {
     type: "raster",
-    tiles: [TILER_BASE + encodeURIComponent(cogUrl)],
+    tiles: [
+      TILER_BASE + encodeURIComponent(cogUrl)
+    ],
     tileSize: 256
   });
 
   map.addLayer({
     id: "reef-layer",
     type: "raster",
-    source: "reef"
+    source: "reef",
+    paint: {
+      "raster-opacity": 0.9
+    }
   });
 }
 
