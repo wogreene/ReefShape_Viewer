@@ -45,8 +45,8 @@ const STYLE = {
 
 const map = new maplibregl.Map({
   container: "map",
-  center: [-77.21, 25.42],
-  zoom: 8,
+  center: [-79.21, 25.42],
+  zoom: 10,
   minZoom: 0,
   maxZoom: 26,
   style: STYLE
