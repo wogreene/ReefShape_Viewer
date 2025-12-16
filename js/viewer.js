@@ -6,7 +6,25 @@ const reefId = params.get("id");
 
 const map = new maplibregl.Map({
   container: "map",
-  style: "https://demotiles.maplibre.org/style.json",
+  style: {
+  version: 8,
+  sources: {
+    "esri-satellite": {
+      type: "raster",
+      tiles: [
+        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      tileSize: 256
+    }
+  },
+  layers: [
+    {
+      id: "esri-satellite",
+      type: "raster",
+      source: "esri-satellite"
+    }
+  ]
+}
   center: [-77.32, 25.08],
   zoom: 16
 });
