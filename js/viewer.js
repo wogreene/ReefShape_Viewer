@@ -1,19 +1,17 @@
 // js/viewer.js
 
+// TiTiler XYZ endpoint (WebMercator)
 const TILER_BASE =
-  "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?url=";
-
-// 🔑 Native resolution of your COG (~0.5 mm)
-const REEF_NATIVE_MAX_ZOOM = 28;
+  "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?tileSize=512&url=";
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
 
 const map = new maplibregl.Map({
   container: "map",
-  minZoom: 0,
 
-  // Allow overscaling beyond native resolution
+  // Allow very deep zoom for mm-scale inspection (overscaling)
+  minZoom: 0,
   maxZoom: 32,
 
   style: {
@@ -42,7 +40,7 @@ const map = new maplibregl.Map({
   }
 });
 
-// Scale bar (critical at mm scale)
+// Scale bar (critical for mm-scale work)
 map.addControl(
   new maplibregl.ScaleControl({
     maxWidth: 140,
@@ -53,6 +51,7 @@ map.addControl(
 
 async function init() {
   const sites = await fetch("data/sites.geojson").then(r => r.json());
+
   const feature = sites.features.find(
     f => f.properties.id === reefId
   );
@@ -65,6 +64,13 @@ async function init() {
   const { timepoints, bounds } = feature.properties;
   const years = Object.keys(timepoints);
 
+  // 🔑 Prevent accidental global panning
+  map.setMaxBounds([
+    [bounds[0], bounds[1]],
+    [bounds[2], bounds[3]]
+  ]);
+
+  // Zoom to reef bounds immediately
   map.fitBounds(bounds, {
     padding: 40,
     duration: 0
@@ -79,24 +85,29 @@ async function init() {
   });
 
   map.on("load", () => {
-    addRaster(timepoints[years[0]]);
+    addRaster(timepoints[years[0]], bounds);
+
+    // Basemap is useless beyond this — stop rendering it
+    map.setLayerZoomRange("satellite", 0, 18);
   });
 
   select.onchange = () => {
-    switchTimepoint(timepoints[select.value]);
+    switchTimepoint(timepoints[select.value], bounds);
   };
 }
 
-function addRaster(cogUrl) {
+function addRaster(cogUrl, bounds) {
   map.addSource("reef", {
     type: "raster",
     tiles: [
       TILER_BASE + encodeURIComponent(cogUrl)
     ],
-    tileSize: 256,
 
-    // 🔑 THIS is the missing link
-    maxzoom: REEF_NATIVE_MAX_ZOOM
+    // 🔑 Big performance win
+    tileSize: 512,
+
+    // 🔑 Critical: prevents global tile spam
+    bounds: bounds
   });
 
   map.addLayer({
@@ -106,13 +117,16 @@ function addRaster(cogUrl) {
     paint: {
       "raster-opacity": 0.95,
 
-      // Honest pixel behavior
-      "raster-resampling": "nearest"
+      // 🔑 Honest pixel behavior at mm scale
+      "raster-resampling": "nearest",
+
+      // 🔑 Prevent tile fade churn
+      "raster-fade-duration": 0
     }
   });
 }
 
-function switchTimepoint(cogUrl) {
+function switchTimepoint(cogUrl, bounds) {
   map.getSource("reef").setTiles([
     TILER_BASE + encodeURIComponent(cogUrl)
   ]);
