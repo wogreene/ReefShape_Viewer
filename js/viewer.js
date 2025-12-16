@@ -1,8 +1,7 @@
 // js/viewer.js
 
-// TiTiler XYZ endpoint (WebMercator)
 const TILER_BASE =
-  "https://reef-titiler.onrender.com/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?tileSize=512&url=";
+  "http://localhost:8000/cog/tiles/WebMercatorQuad/{z}/{x}/{y}.png?tileSize=512&url=";
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
@@ -10,7 +9,7 @@ const reefId = params.get("id");
 const map = new maplibregl.Map({
   container: "map",
 
-  // Allow very deep zoom for mm-scale inspection (overscaling)
+  // Allow deep zoom for mm-scale inspection
   minZoom: 0,
   maxZoom: 32,
 
@@ -40,7 +39,7 @@ const map = new maplibregl.Map({
   }
 });
 
-// Scale bar (critical for mm-scale work)
+// Scale bar
 map.addControl(
   new maplibregl.ScaleControl({
     maxWidth: 140,
@@ -64,13 +63,13 @@ async function init() {
   const { timepoints, bounds } = feature.properties;
   const years = Object.keys(timepoints);
 
-  // 🔑 Prevent accidental global panning
+  // Prevent accidental global panning
   map.setMaxBounds([
     [bounds[0], bounds[1]],
     [bounds[2], bounds[3]]
   ]);
 
-  // Zoom to reef bounds immediately
+  // Zoom to reef bounds
   map.fitBounds(bounds, {
     padding: 40,
     duration: 0
@@ -86,13 +85,11 @@ async function init() {
 
   map.on("load", () => {
     addRaster(timepoints[years[0]], bounds);
-
-    // Basemap is useless beyond this — stop rendering it
     map.setLayerZoomRange("satellite", 0, 18);
   });
 
   select.onchange = () => {
-    switchTimepoint(timepoints[select.value], bounds);
+    switchTimepoint(timepoints[select.value]);
   };
 }
 
@@ -103,10 +100,13 @@ function addRaster(cogUrl, bounds) {
       TILER_BASE + encodeURIComponent(cogUrl)
     ],
 
-    // 🔑 Big performance win
     tileSize: 512,
 
-    // 🔑 Critical: prevents global tile spam
+    // 🔑 THIS IS THE MISSING LINE
+    // Allows MapLibre to request deeper tiles
+    maxzoom: 30,
+
+    // Prevent global tile spam
     bounds: bounds
   });
 
@@ -116,17 +116,13 @@ function addRaster(cogUrl, bounds) {
     source: "reef",
     paint: {
       "raster-opacity": 0.95,
-
-      // 🔑 Honest pixel behavior at mm scale
       "raster-resampling": "nearest",
-
-      // 🔑 Prevent tile fade churn
       "raster-fade-duration": 0
     }
   });
 }
 
-function switchTimepoint(cogUrl, bounds) {
+function switchTimepoint(cogUrl) {
   map.getSource("reef").setTiles([
     TILER_BASE + encodeURIComponent(cogUrl)
   ]);
