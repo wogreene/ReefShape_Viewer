@@ -9,7 +9,7 @@ const reefId = params.get("id");
 const map = new maplibregl.Map({
   container: "map",
   minZoom: 0,
-  maxZoom: 26,
+  maxZoom: 30,
 
   style: {
     version: 8,
@@ -20,7 +20,7 @@ const map = new maplibregl.Map({
           "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
         ],
         tileSize: 256,
-        maxzoom: 19
+        maxzoom: 18
       }
     },
     layers: [
@@ -29,7 +29,7 @@ const map = new maplibregl.Map({
         type: "raster",
         source: "esri-satellite",
         paint: {
-          "raster-resampling": "nearest"
+          "raster-resampling": "linear"
         }
       }
     ]
