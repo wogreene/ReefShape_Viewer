@@ -132,3 +132,54 @@ button:active {
 #enter-button:active {
   background-color: #444;
 }
+
+/* ---------- Mobile overrides ---------- */
+
+@media (max-width: 768px) {
+
+  /* General text */
+  body {
+    font-size: 18px;
+  }
+
+  /* Controls container */
+  #controls {
+    top: 14px;
+    left: 14px;
+    padding: 10px 12px;
+  }
+
+  /* Buttons and selects */
+  button,
+  select {
+    font-size: 18px;
+    padding: 10px 14px;
+  }
+
+  /* Intro modal content */
+  #intro-content {
+    max-width: 90%;
+    padding: 24px;
+  }
+
+  #intro-title {
+    font-size: 28px;
+  }
+
+  #intro-description {
+    font-size: 18px;
+    line-height: 1.6;
+  }
+
+  #enter-button {
+    font-size: 20px;
+    padding: 14px 28px;
+  }
+
+  /* MapLibre controls (if present) */
+  .maplibregl-ctrl {
+    transform: scale(1.3);
+    transform-origin: top left;
+  }
+}
+
