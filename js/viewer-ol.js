@@ -81,6 +81,7 @@ const reefLayer = new WebGLTileLayer({
 // --------------------------------------------------
 // Map
 // --------------------------------------------------
+import { defaults as defaultInteractions } from "https://esm.sh/ol@latest/interaction/defaults.js";
 
 const map = new Map({
   target: "map",
@@ -91,8 +92,13 @@ const map = new Map({
     rotate: false,
     attribution: false
   }),
+  interactions: defaultInteractions({
+    altShiftDragRotate: true,  // 🔑 enable desktop rotation
+    pinchRotate: true          // keep mobile rotation
+  }),
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
 });
+
 
 // Black background for NoData
 map.getViewport().style.background = "black";
