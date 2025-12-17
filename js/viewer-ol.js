@@ -43,19 +43,37 @@ const view = new View({
     (bounds[0] + bounds[2]) / 2,
     (bounds[1] + bounds[3]) / 2
   ],
-  zoom: 20,
+  zoom: 21,
   maxZoom: 30,
   constrainResolution: false
 });
+
+// --------------------------------------------------
+// GeoTIFF source factory (CRITICAL FIXES HERE)
+// --------------------------------------------------
+
+function makeGeoTIFFSource(url) {
+  return new GeoTIFF({
+    sources: [
+      {
+        url,
+        bands: [1, 2, 3],
+        noData: 0
+      }
+    ],
+
+    // 🔑 DO NOT normalize RGB imagery
+    normalize: false
+  });
+}
 
 // --------------------------------------------------
 // Layer
 // --------------------------------------------------
 
 const reefLayer = new WebGLTileLayer({
-  source: new GeoTIFF({
-    sources: [{ url: timepoints[years[0]], bands: [1, 2, 3] }]
-  }),
+  source: makeGeoTIFFSource(timepoints[years[0]]),
+
   interpolate: true,
   preload: 2,
   transition: 0,
@@ -63,7 +81,7 @@ const reefLayer = new WebGLTileLayer({
 });
 
 // --------------------------------------------------
-// Map (no default zoom controls)
+// Map
 // --------------------------------------------------
 
 const map = new Map({
@@ -79,7 +97,7 @@ const map = new Map({
 });
 
 // --------------------------------------------------
-// Correct OpenLayers scalebar (styled via CSS)
+// Correct OpenLayers scalebar (already verified)
 // --------------------------------------------------
 
 map.addControl(
@@ -105,11 +123,7 @@ years.forEach(y => {
 });
 
 select.addEventListener("change", () => {
-  reefLayer.setSource(
-    new GeoTIFF({
-      sources: [{ url: timepoints[select.value], bands: [1, 2, 3] }]
-    })
-  );
+  reefLayer.setSource(makeGeoTIFFSource(timepoints[select.value]));
 });
 
 // --------------------------------------------------
