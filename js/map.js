@@ -11,7 +11,7 @@ const map = new maplibregl.Map({
   style: {
     version: 8,
 
-    /* 🔑 REQUIRED for text rendering */
+    // 🔑 REQUIRED for text rendering
     glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
 
     sources: {
@@ -64,7 +64,7 @@ const map = new maplibregl.Map({
         }
       },
 
-      /* ---------- Reef labels (Courier-style) ---------- */
+      /* ---------- Reef labels (Roboto Regular) ---------- */
       {
         id: "site-labels",
         type: "symbol",
@@ -72,8 +72,8 @@ const map = new maplibregl.Map({
         layout: {
           "text-field": ["get", "name"],
 
-          /* Monospace font */
-          "text-font": ["Noto Sans Mono Regular"],
+          // ✅ Supported by glyph server
+          "text-font": ["Roboto Regular"],
 
           "text-size": [
             "interpolate",
@@ -108,38 +108,4 @@ map.on("mouseleave", "sites", () => {
   map.getCanvas().style.cursor = "";
 });
 map.on("mouseenter", "site-labels", () => {
-  map.getCanvas().style.cursor = "pointer";
-});
-map.on("mouseleave", "site-labels", () => {
-  map.getCanvas().style.cursor = "";
-});
-
-/* -----------------------------------
-   Click → viewer navigation
------------------------------------ */
-
-function handleSiteClick(e) {
-  const feature = e.features && e.features[0];
-  if (!feature || !feature.properties || !feature.properties.id) {
-    console.error("Clicked feature missing properties.id");
-    return;
-  }
-
-  const reefId = feature.properties.id;
-  window.location.href = `viewer.html?id=${reefId}`;
-}
-
-map.on("click", "sites", handleSiteClick);
-map.on("click", "site-labels", handleSiteClick);
-
-/* -----------------------------------
-   Optional scale bar
------------------------------------ */
-
-map.addControl(
-  new maplibregl.ScaleControl({
-    maxWidth: 120,
-    unit: "metric"
-  }),
-  "bottom-right"
-);
+  map.getCanvas().style.cursor = "poin
