@@ -156,4 +156,3 @@ function openViewChoiceModal(id, name) {
     if (e.target === modal) modal.style.display = "none";
   };
 }
-
