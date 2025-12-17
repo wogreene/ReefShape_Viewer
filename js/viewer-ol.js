@@ -1,5 +1,5 @@
 // js/viewer-ol.js
-// OpenLayers ES modules via esm.sh (dependency-safe)
+// OpenLayers GeoTIFF viewer via esm.sh (dependency-safe)
 
 import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
@@ -10,30 +10,32 @@ import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 const COG_URL =
   "https://dl.dropboxusercontent.com/scl/fi/6o939vhxcpxtrw4qcg9xx/BullRun_20251103_cog.tif?rlkey=cz07p9uq4p4al5ww5wzdf4ick";
 
-// Create a GeoTIFF source
+// 🔑 Explicitly specify RGB bands
 const reefSource = new GeoTIFF({
   sources: [
-    { url: COG_URL }
-  ],
-  convertToRGB: true
+    {
+      url: COG_URL,
+      bands: [1, 2, 3]
+    }
+  ]
 });
 
-// Wrap it in a tile layer
+// Tile layer
 const reefLayer = new TileLayer({
   source: reefSource
 });
 
-// Create the map
+// Map
 const map = new Map({
   target: "map",
   layers: [reefLayer],
   view: new View({
     projection: "EPSG:4326",
 
-    // Approximate reef center
+    // Reef center (approx)
     center: [-79.2479, 25.4535],
 
-    // Starting zoom
+    // Initial zoom
     zoom: 17
   })
 });
