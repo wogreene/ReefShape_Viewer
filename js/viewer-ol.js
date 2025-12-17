@@ -6,6 +6,8 @@ import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
+import DragRotate from "https://esm.sh/ol@latest/interaction/DragRotate.js";
+import { platformModifierKeyOnly } from "https://esm.sh/ol@latest/events/condition.js";
 
 // --------------------------------------------------
 // Read reef ID
@@ -92,10 +94,19 @@ const map = new Map({
     rotate: false,
     attribution: false
   }),
-  interactions: defaultInteractions({
-    altShiftDragRotate: true,  // 🔑 enable desktop rotation
-    pinchRotate: true          // keep mobile rotation
-  }),
+  interactions: [
+    // default interactions, but WITHOUT default rotation
+    ...defaultInteractions({
+      altShiftDragRotate: false,
+      pinchRotate: true,
+      onFocusOnly: true
+    }),
+
+    // 🔑 Cmd (macOS) or Ctrl (Win/Linux) + drag = rotate
+    new DragRotate({
+      condition: platformModifierKeyOnly
+    })
+  ],
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
 });
 
