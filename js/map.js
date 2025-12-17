@@ -3,7 +3,7 @@
 
 const map = new maplibregl.Map({
   container: "map",
-  center: [-79.5, 25.2], // adjust as needed
+  center: [-79.21, 25.42], // adjust as needed
   zoom: 10,
   minZoom: 2,
   maxZoom: 22,
