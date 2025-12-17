@@ -27,57 +27,82 @@
       background: #000;
     }
 
-    /* UI overlay */
+    /* ---------- UI overlay ---------- */
+
     .viewer-ui {
       position: absolute;
       top: 12px;
       left: 12px;
-      z-index: 1000;
+      z-index: 2000;
 
-      background: rgba(0, 0, 0, 0.85);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      background: rgba(0, 0, 0, 0.9);
       padding: 10px 12px;
       border-radius: 6px;
+      border: 1px solid rgba(255,255,255,0.25);
+
       font-size: 14px;
     }
 
-    .viewer-ui select {
+    .viewer-ui select,
+    .viewer-ui button {
       font-family: inherit;
-      font-size: 14px;
+      font-size: inherit;
       background: #000;
       color: #fff;
       border: 1px solid #888;
-      margin-left: 6px;
+      padding: 2px 8px;
+      cursor: pointer;
+    }
+
+    .viewer-ui button:hover {
+      background: #222;
+    }
+
+    .viewer-ui button:active {
+      background: #444;
     }
 
     .back-link {
-      display: block;
-      margin-bottom: 6px;
+      margin-right: 6px;
       text-decoration: none;
       font-weight: bold;
       color: #fff;
     }
 
-    /* ---------- Minimal scalebar ---------- */
-
-    .scalebar {
-      position: absolute;
-      bottom: 14px;
-      left: 14px;
-      z-index: 1000;
-
-      background: rgba(0, 0, 0, 0.85);
-      padding: 6px 8px;
-      border-radius: 4px;
-
-      font-size: 13px;
-      line-height: 1.2;
-      white-space: nowrap;
+    .back-link:hover {
+      text-decoration: underline;
     }
 
-    .scalebar-line {
+    /* ---------- Restyled OpenLayers scalebar ---------- */
+
+    .ol-scale-line {
+      bottom: 14px !important;
+      left: 14px !important;
+
+      background: rgba(0, 0, 0, 0.9) !important;
+      border: 1px solid rgba(255,255,255,0.25);
+      border-radius: 6px;
+
+      padding: 8px 10px !important;
+    }
+
+    .ol-scale-line-inner {
+      color: #fff !important;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 13px;
+
+      border: none !important;
+      background: none !important;
+    }
+
+    .ol-scale-line-inner > div {
+      background: #fff !important;
       height: 2px;
-      background: #fff;
-      margin-bottom: 4px;
+      margin-top: 6px;
     }
 
     @media (max-width: 768px) {
@@ -85,16 +110,16 @@
         font-size: 16px;
       }
 
-      .viewer-ui select {
+      .viewer-ui select,
+      .viewer-ui button {
         font-size: 16px;
       }
 
-      .scalebar {
+      .ol-scale-line-inner {
         font-size: 16px;
-        padding: 8px 10px;
       }
 
-      .scalebar-line {
+      .ol-scale-line-inner > div {
         height: 3px;
       }
     }
@@ -105,17 +130,15 @@
 <div id="map"></div>
 
 <div class="viewer-ui">
-  <a class="back-link" href="./index.html">← Back to map</a>
-  Timepoint:
+  <a class="back-link" href="./index.html">←</a>
+
+  <button id="zoomOut">−</button>
+  <button id="zoomIn">+</button>
+
+  Time:
   <select id="timepointSelect"></select>
 </div>
 
-<div class="scalebar" id="scalebar">
-  <div class="scalebar-line" id="scalebarLine"></div>
-  <div id="scalebarText"></div>
-</div>
-
 <script type="module" src="js/viewer-ol.js"></script>
-
 </body>
 </html>
