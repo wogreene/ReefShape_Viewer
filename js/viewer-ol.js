@@ -49,30 +49,35 @@ const view = new View({
 });
 
 // --------------------------------------------------
-// GeoTIFF source factory (stable, image-based)
+// GeoTIFF source factory (IMAGE-based, stable)
 // --------------------------------------------------
 
 function createGeoTIFFSource(url) {
   return new GeoTIFF({
-    sources: [{ url, bands: [1, 2, 3] }],
-    renderMode: "image",   // 🔑 eliminates diagonal triangle artifacts
-    interpolate: true,     // allow blur instead of seams
+    sources: [{
+      url,
+      bands: [1, 2, 3]
+    }],
+
+    renderMode: "image",     // 🔑 no GPU fragment artifacts
+    convertToRGB: true,      // 🔑 REQUIRED for TileLayer
+    interpolate: true,       // blur instead of seams
     nodata: 0
   });
 }
 
 // --------------------------------------------------
-// Layer (IMAGE tiles, not WebGL)
+// Layer (TileLayer, NOT WebGL)
 // --------------------------------------------------
 
 const reefLayer = new TileLayer({
   source: createGeoTIFFSource(timepoints[years[0]]),
-  preload: 2,        // reduces edge seams
+  preload: 2,
   transition: 0
 });
 
 // --------------------------------------------------
-// Map (no default zoom controls)
+// Map
 // --------------------------------------------------
 
 const map = new Map({
@@ -87,11 +92,11 @@ const map = new Map({
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
 });
 
-// Black background for NoData areas
+// Black background for NoData
 map.getViewport().style.background = "black";
 
 // --------------------------------------------------
-// Correct OpenLayers scalebar (styled via CSS)
+// Correct scalebar (styled via CSS)
 // --------------------------------------------------
 
 map.addControl(
