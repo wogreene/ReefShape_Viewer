@@ -44,7 +44,7 @@ const view = new View({
     (bounds[1] + bounds[3]) / 2
   ],
   zoom: 22,
-  maxZoom: 30,
+  maxZoom: 29,
   constrainResolution: false,
   smoothResolutionConstraint: true
 });
