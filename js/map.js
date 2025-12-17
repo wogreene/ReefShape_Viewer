@@ -118,7 +118,7 @@ map.on("click", "sites", e => {
     openViewChoiceModal(id, name);
   } else {
     // default behavior
-    window.location.href = `viewer-ol.html?id=${id}`;
+    window.location.href = `viewer.html?id=${id}`;
   }
 });
 
@@ -140,7 +140,7 @@ function openViewChoiceModal(id, name) {
   modal.style.display = "flex";
 
   document.getElementById("view-2d").onclick = () => {
-    window.location.href = `viewer-ol.html?id=${id}`;
+    window.location.href = `viewer.html?id=${id}`;
   };
 
   document.getElementById("view-3d").onclick = () => {
