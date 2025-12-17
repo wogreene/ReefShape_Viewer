@@ -15,6 +15,9 @@
       padding: 0;
       height: 100%;
       overflow: hidden;
+
+      /* Global monospace look */
+      font-family: "Courier New", Courier, monospace;
     }
 
     #map {
@@ -28,15 +31,16 @@
       top: 12px;
       left: 12px;
       z-index: 1000;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 8px 10px;
+      background: rgba(255, 255, 255, 0.92);
+      padding: 10px 12px;
       border-radius: 6px;
-      font-family: sans-serif;
       font-size: 14px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+      box-shadow: 0 2px 6px rgba(0,0,0,0.25);
     }
 
     .viewer-ui select {
+      font-family: inherit;
+      font-size: 14px;
       margin-left: 6px;
     }
 
@@ -45,7 +49,31 @@
       margin-bottom: 6px;
       text-decoration: none;
       font-weight: bold;
-      color: #333;
+      color: #000;
+    }
+
+    /* ---------- Scalebar styling ---------- */
+
+    .ol-scale-bar,
+    .ol-scale-line {
+      font-family: "Courier New", Courier, monospace;
+    }
+
+    .ol-scale-bar-inner,
+    .ol-scale-line-inner {
+      font-size: 14px;
+      line-height: 1.4;
+      border: 2px solid #000;
+    }
+
+    /* Mobile: make scalebar much larger */
+    @media (max-width: 768px) {
+      .ol-scale-bar-inner,
+      .ol-scale-line-inner {
+        font-size: 18px;
+        border-width: 3px;
+        padding: 4px 6px;
+      }
     }
   </style>
 </head>
