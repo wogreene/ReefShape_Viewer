@@ -10,28 +10,24 @@
   />
 
   <style>
-    /* ---------- Global ---------- */
-
     html, body {
       margin: 0;
       padding: 0;
       height: 100%;
       overflow: hidden;
 
-      background: #000; /* Black background */
+      background: #000;
       color: #fff;
-
       font-family: "Courier New", Courier, monospace;
     }
 
     #map {
       width: 100%;
       height: 100%;
-      background: #000; /* Ensures NoData blends seamlessly */
+      background: #000;
     }
 
-    /* ---------- UI overlay ---------- */
-
+    /* UI overlay */
     .viewer-ui {
       position: absolute;
       top: 12px;
@@ -39,13 +35,9 @@
       z-index: 1000;
 
       background: rgba(0, 0, 0, 0.85);
-      color: #fff;
-
       padding: 10px 12px;
       border-radius: 6px;
-
       font-size: 14px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.6);
     }
 
     .viewer-ui select {
@@ -65,56 +57,45 @@
       color: #fff;
     }
 
-    .back-link:hover {
-      text-decoration: underline;
-    }
+    /* ---------- Minimal scalebar ---------- */
 
-    /* ---------- High-contrast scalebar ---------- */
+    .scalebar {
+      position: absolute;
+      bottom: 14px;
+      left: 14px;
+      z-index: 1000;
 
-    .ol-scale-bar,
-    .ol-scale-line {
-      background: none !important;
-    }
-
-    .ol-scale-bar-inner,
-    .ol-scale-line-inner {
-      background: #ffffff !important;
-      color: #000000 !important;
-
-      border: 2px solid #000;
+      background: rgba(0, 0, 0, 0.85);
+      padding: 6px 8px;
       border-radius: 4px;
 
-      padding: 6px 8px;
-      font-weight: bold;
-
-      text-shadow:
-        -1px -1px 0 #fff,
-         1px -1px 0 #fff,
-        -1px  1px 0 #fff,
-         1px  1px 0 #fff;
+      font-size: 13px;
+      line-height: 1.2;
+      white-space: nowrap;
     }
 
-    .ol-scale-bar-inner > div,
-    .ol-scale-line-inner > div {
-      margin-top: 4px;
+    .scalebar-line {
+      height: 2px;
+      background: #fff;
+      margin-bottom: 4px;
     }
-
-    /* ---------- Mobile scaling ---------- */
 
     @media (max-width: 768px) {
-      .ol-scale-bar-inner,
-      .ol-scale-line-inner {
-        font-size: 18px;
-        border-width: 3px;
-        padding: 8px 10px;
-      }
-
       .viewer-ui {
         font-size: 16px;
       }
 
       .viewer-ui select {
         font-size: 16px;
+      }
+
+      .scalebar {
+        font-size: 16px;
+        padding: 8px 10px;
+      }
+
+      .scalebar-line {
+        height: 3px;
       }
     }
   </style>
@@ -127,6 +108,11 @@
   <a class="back-link" href="./index.html">← Back to map</a>
   Timepoint:
   <select id="timepointSelect"></select>
+</div>
+
+<div class="scalebar" id="scalebar">
+  <div class="scalebar-line" id="scalebarLine"></div>
+  <div id="scalebarText"></div>
 </div>
 
 <script type="module" src="js/viewer-ol.js"></script>
