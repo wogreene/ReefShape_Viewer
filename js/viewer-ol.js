@@ -6,6 +6,9 @@ import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
+import TileQueue from 'ol/TileQueue';
+
+TileQueue.prototype.maxTilesLoading_ = 4;
 
 // --------------------------------------------------
 // Read reef ID
@@ -56,10 +59,12 @@ const reefLayer = new WebGLTileLayer({
   source: new GeoTIFF({
     sources: [{ url: timepoints[years[0]], bands: [1, 2, 3] }]
   }),
+  renderMode: "image",
   interpolate: true,
   preload: 2,
   transition: 0,
-  cacheSize: 512
+  cacheSize: 512,
+  nodata: 0
 });
 
 // --------------------------------------------------
