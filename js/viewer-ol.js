@@ -2,7 +2,7 @@
 
 import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
-import TileLayer from "https://esm.sh/ol@latest/layer/Tile.js";
+import ImageLayer from "https://esm.sh/ol@latest/layer/Image.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
@@ -49,7 +49,7 @@ const view = new View({
 });
 
 // --------------------------------------------------
-// GeoTIFF source factory (IMAGE-based, stable)
+// GeoTIFF source factory (IMAGE rendering)
 // --------------------------------------------------
 
 function createGeoTIFFSource(url) {
@@ -58,22 +58,18 @@ function createGeoTIFFSource(url) {
       url,
       bands: [1, 2, 3]
     }],
-
-    renderMode: "image",     // 🔑 no GPU fragment artifacts
-    convertToRGB: true,      // 🔑 REQUIRED for TileLayer
-    interpolate: true,       // blur instead of seams
+    convertToRGB: true,
+    interpolate: true,
     nodata: 0
   });
 }
 
 // --------------------------------------------------
-// Layer (TileLayer, NOT WebGL)
+// IMAGE layer (this is the key fix)
 // --------------------------------------------------
 
-const reefLayer = new TileLayer({
-  source: createGeoTIFFSource(timepoints[years[0]]),
-  preload: 2,
-  transition: 0
+const reefLayer = new ImageLayer({
+  source: createGeoTIFFSource(timepoints[years[0]])
 });
 
 // --------------------------------------------------
