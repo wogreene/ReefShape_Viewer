@@ -2,7 +2,7 @@
 
 import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
-import ImageLayer from "https://esm.sh/ol@latest/layer/Image.js";
+import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
@@ -45,11 +45,12 @@ const view = new View({
   ],
   zoom: 22,
   maxZoom: 30,
-  constrainResolution: false
+  constrainResolution: false,
+  smoothResolutionConstraint: true
 });
 
 // --------------------------------------------------
-// GeoTIFF source factory (IMAGE rendering)
+// GeoTIFF source factory
 // --------------------------------------------------
 
 function createGeoTIFFSource(url) {
@@ -58,18 +59,23 @@ function createGeoTIFFSource(url) {
       url,
       bands: [1, 2, 3]
     }],
-    convertToRGB: true,
-    interpolate: true,
-    nodata: 0
+    interpolate: true,   // blur instead of seams
+    nodata: 0,
+    wrapX: false
   });
 }
 
 // --------------------------------------------------
-// IMAGE layer (this is the key fix)
+// WebGLTileLayer (ONLY supported option)
 // --------------------------------------------------
 
-const reefLayer = new ImageLayer({
-  source: createGeoTIFFSource(timepoints[years[0]])
+const reefLayer = new WebGLTileLayer({
+  source: createGeoTIFFSource(timepoints[years[0]]),
+
+  // Artifact mitigation
+  transition: 0,                // no cross-fade flicker
+  cacheSize: 256,               // limit GPU pressure
+  useInterimTilesOnError: false // no corrupted fallbacks
 });
 
 // --------------------------------------------------
@@ -92,7 +98,7 @@ const map = new Map({
 map.getViewport().style.background = "black";
 
 // --------------------------------------------------
-// Correct scalebar (styled via CSS)
+// Scalebar
 // --------------------------------------------------
 
 map.addControl(
@@ -106,7 +112,7 @@ map.addControl(
 );
 
 // --------------------------------------------------
-// Timepoint selector (preserve view extent)
+// Timepoint selector (preserve view)
 // --------------------------------------------------
 
 const select = document.getElementById("timepointSelect");
