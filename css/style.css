@@ -183,3 +183,55 @@ button:active {
   }
 }
 
+#view-choice-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+#view-choice-content {
+  background: black;
+  color: white;
+  font-family: "Courier New", Courier, monospace;
+  padding: 24px 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.3);
+  text-align: center;
+  min-width: 260px;
+}
+
+#view-choice-content h2 {
+  margin-top: 0;
+  margin-bottom: 16px;
+  font-size: 20px;
+}
+
+.view-choice-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+#view-choice-content button {
+  font-family: inherit;
+  font-size: 15px;
+  padding: 10px;
+  background: black;
+  color: white;
+  border: 1px solid white;
+  cursor: pointer;
+}
+
+#view-choice-content button:hover {
+  background: white;
+  color: black;
+}
+
+#view-cancel {
+  border-color: rgba(255,255,255,0.4);
+}
