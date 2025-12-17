@@ -4,7 +4,8 @@ import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
 import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
-import { getPointResolution } from "https://esm.sh/ol@latest/proj.js";
+import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
+import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
 
 // --------------------------------------------------
 // Read reef ID
@@ -12,7 +13,10 @@ import { getPointResolution } from "https://esm.sh/ol@latest/proj.js";
 
 const params = new URLSearchParams(window.location.search);
 const reefId = params.get("id");
-if (!reefId) throw new Error("No reef id specified");
+if (!reefId) {
+  alert("No reef id specified");
+  throw new Error("Missing reef id");
+}
 
 // --------------------------------------------------
 // Load metadata
@@ -20,7 +24,11 @@ if (!reefId) throw new Error("No reef id specified");
 
 const sites = await fetch("data/sites.geojson").then(r => r.json());
 const feature = sites.features.find(f => f.properties.id === reefId);
-if (!feature) throw new Error("Reef not found");
+
+if (!feature) {
+  alert("Reef not found");
+  throw new Error("Invalid reef id");
+}
 
 const { timepoints, bounds } = feature.properties;
 const years = Object.keys(timepoints);
@@ -41,35 +49,48 @@ const view = new View({
 });
 
 // --------------------------------------------------
-// GeoTIFF layer (stabilized)
+// Layer
 // --------------------------------------------------
 
-let reefLayer = new WebGLTileLayer({
+const reefLayer = new WebGLTileLayer({
   source: new GeoTIFF({
-    sources: [
-      {
-        url: timepoints[years[0]],
-        bands: [1, 2, 3]
-      }
-    ]
+    sources: [{ url: timepoints[years[0]], bands: [1, 2, 3] }]
   }),
-
   interpolate: true,
   preload: 2,
-  transition: 0,       // 🔑 disable fade animation
-  cacheSize: 512       // 🔑 reduce tile churn
+  transition: 0,
+  cacheSize: 512
 });
 
 // --------------------------------------------------
-// Map
+// Map (no default zoom controls)
 // --------------------------------------------------
 
 const map = new Map({
   target: "map",
   layers: [reefLayer],
   view,
-  pixelRatio: Math.min(window.devicePixelRatio || 1, 2) // 🔑 mobile GPU safety
+  controls: defaultControls({
+    zoom: false,
+    rotate: false,
+    attribution: false
+  }),
+  pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
 });
+
+// --------------------------------------------------
+// Correct OpenLayers scalebar (styled via CSS)
+// --------------------------------------------------
+
+map.addControl(
+  new ScaleLine({
+    units: "metric",
+    bar: true,
+    steps: 4,
+    text: true,
+    minWidth: 120
+  })
+);
 
 // --------------------------------------------------
 // Timepoint selector
@@ -86,54 +107,19 @@ years.forEach(y => {
 select.addEventListener("change", () => {
   reefLayer.setSource(
     new GeoTIFF({
-      sources: [
-        {
-          url: timepoints[select.value],
-          bands: [1, 2, 3]
-        }
-      ]
+      sources: [{ url: timepoints[select.value], bands: [1, 2, 3] }]
     })
   );
 });
 
 // --------------------------------------------------
-// Custom scalebar (distance + scale ratio)
+// Custom zoom buttons
 // --------------------------------------------------
 
-const barEl = document.getElementById("scalebarLine");
-const textEl = document.getElementById("scalebarText");
+document.getElementById("zoomIn").onclick = () => {
+  view.setZoom(view.getZoom() + 1);
+};
 
-function updateScalebar() {
-  const resolution = view.getResolution();
-  if (!resolution) return;
-
-  const center = view.getCenter();
-  const metersPerPixel = getPointResolution(
-    view.getProjection(),
-    resolution,
-    center
-  );
-
-  // Choose a nice round distance
-  const targetPx = 100;
-  let meters = metersPerPixel * targetPx;
-
-  const scales = [1, 2, 5, 10];
-  let pow = Math.pow(10, Math.floor(Math.log10(meters)));
-  let nice = scales.find(s => s * pow >= meters) || 10 * pow;
-  const displayMeters = nice;
-  const displayPx = displayMeters / metersPerPixel;
-
-  barEl.style.width = `${displayPx}px`;
-
-  const scaleRatio = Math.round(1 / (metersPerPixel * 0.001)); // approx
-  const label =
-    displayMeters >= 1
-      ? `${displayMeters.toFixed(2)} m`
-      : `${(displayMeters * 1000).toFixed(1)} mm`;
-
-  textEl.textContent = `${label}   |   1:${scaleRatio}`;
-}
-
-view.on("change:resolution", updateScalebar);
-updateScalebar();
+document.getElementById("zoomOut").onclick = () => {
+  view.setZoom(view.getZoom() - 1);
+};
