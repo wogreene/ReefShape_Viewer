@@ -77,7 +77,7 @@
       text-decoration: underline;
     }
 
-    /* ---------- Restyled OpenLayers scalebar ---------- */
+    /* ---------- OpenLayers scalebar (bigger halo) ---------- */
 
     .ol-scale-line {
       bottom: 14px !important;
@@ -95,8 +95,19 @@
       font-family: "Courier New", Courier, monospace;
       font-size: 13px;
 
-      border: none !important;
       background: none !important;
+      border: none !important;
+
+      /* 🔑 THICKER, HIGH-CONTRAST HALO */
+      text-shadow:
+        -2px -2px 0 #000,
+         0px -2px 0 #000,
+         2px -2px 0 #000,
+        -2px  0px 0 #000,
+         2px  0px 0 #000,
+        -2px  2px 0 #000,
+         0px  2px 0 #000,
+         2px  2px 0 #000;
     }
 
     .ol-scale-line-inner > div {
