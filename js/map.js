@@ -109,9 +109,19 @@ map.on("load", async () => {
 // ---------------------------
 
 map.on("click", "sites", e => {
-  const id = e.features[0].properties.id;
-  window.location.href = `viewer.html?id=${id}`;
+  const feature = e.features[0];
+  const id = feature.properties.id;
+  const name = feature.properties.name;
+
+  // Victory Reef special case
+  if (id === "victoryreef") {
+    openViewChoiceModal(id, name);
+  } else {
+    // default behavior
+    window.location.href = `site.html?id=${id}`;
+  }
 });
+
 
 map.on("mouseenter", "sites", () => {
   map.getCanvas().style.cursor = "pointer";
@@ -120,3 +130,30 @@ map.on("mouseenter", "sites", () => {
 map.on("mouseleave", "sites", () => {
   map.getCanvas().style.cursor = "";
 });
+
+function openViewChoiceModal(id, name) {
+  const modal = document.getElementById("view-choice-modal");
+  const title = document.getElementById("view-choice-title");
+
+  title.textContent = name || "Select view";
+
+  modal.style.display = "flex";
+
+  document.getElementById("view-2d").onclick = () => {
+    window.location.href = `site.html?id=${id}`;
+  };
+
+  document.getElementById("view-3d").onclick = () => {
+    window.location.href = `splat.html?id=${id}`;
+  };
+
+  document.getElementById("view-cancel").onclick = () => {
+    modal.style.display = "none";
+  };
+
+  // Click outside to close
+  modal.onclick = e => {
+    if (e.target === modal) modal.style.display = "none";
+  };
+}
+
