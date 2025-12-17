@@ -4,7 +4,7 @@ const STYLE = {
   version: 8,
 
   // REQUIRED for any text labels
-  glyphs: "https://api.maptiler.com/fonts/{fontstack}/{range}.pbf",
+  glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
 
   sources: {
     "esri-satellite": {
