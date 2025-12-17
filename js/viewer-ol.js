@@ -37,7 +37,7 @@ const { timepoints, bounds } = feature.properties;
 const years = Object.keys(timepoints);
 
 // --------------------------------------------------
-// View: allow deeper zoom than native resolution
+// Map view (CRS-native, deep zoom allowed)
 // --------------------------------------------------
 
 const view = new View({
@@ -48,13 +48,17 @@ const view = new View({
     (bounds[1] + bounds[3]) / 2
   ],
 
-  zoom: 22,
+  zoom: 17,
+  maxZoom: 28,
+  constrainResolution: false,
 
-  // 🔑 Allow zooming beyond native resolution
-  maxZoom: 30,
-
-  // 🔑 Do NOT constrain resolution snapping
-  constrainResolution: false
+  // Slight padding beyond data bounds to avoid edge clipping
+  extent: [
+    bounds[0] - 0.00005,
+    bounds[1] - 0.00005,
+    bounds[2] + 0.00005,
+    bounds[3] + 0.00005
+  ]
 });
 
 // --------------------------------------------------
@@ -71,8 +75,11 @@ let reefLayer = new WebGLTileLayer({
     ]
   }),
 
-  // 🔑 Smooth magnification when zooming past native resolution
-  interpolate: true
+  // Smooth magnification past native resolution
+  interpolate: true,
+
+  // Preload surrounding tiles to avoid edge gaps
+  preload: 2
 });
 
 // --------------------------------------------------
@@ -89,7 +96,7 @@ const map = new Map({
       bar: true,
       steps: 4,
       text: true,
-      minWidth: 140
+      minWidth: 160
     })
   ]
 });
