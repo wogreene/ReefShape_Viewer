@@ -95,7 +95,7 @@ map.on("load", async () => {
       "text-size": 14,
       "text-offset": [0, 1.2],
       "text-anchor": "top",
-      "text-font": ["Open Sans Regular"]
+      "text-font": ["Noto Sans Mono Regular"]
     },
     paint: {
       "text-color": "#ffffff",
