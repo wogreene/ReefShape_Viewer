@@ -3,7 +3,7 @@
 
 const map = new maplibregl.Map({
   container: "map",
-  center: [-79.5, 25.2], // adjust if you want a different initial view
+  center: [-79.5, 25.2], // adjust as needed
   zoom: 10,
   minZoom: 2,
   maxZoom: 22,
@@ -11,8 +11,11 @@ const map = new maplibregl.Map({
   style: {
     version: 8,
 
+    /* 🔑 REQUIRED for text rendering */
+    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+
     sources: {
-      // Satellite basemap
+      /* ---------- Satellite basemap ---------- */
       "esri-satellite": {
         type: "raster",
         tiles: [
@@ -22,7 +25,7 @@ const map = new maplibregl.Map({
         maxzoom: 18
       },
 
-      // Reef sites GeoJSON
+      /* ---------- Reef sites ---------- */
       "sites": {
         type: "geojson",
         data: "data/sites.geojson"
@@ -61,19 +64,22 @@ const map = new maplibregl.Map({
         }
       },
 
-      /* ---------- Reef labels ---------- */
+      /* ---------- Reef labels (Courier-style) ---------- */
       {
         id: "site-labels",
         type: "symbol",
         source: "sites",
         layout: {
           "text-field": ["get", "name"],
-          "text-font": ["Courier New"],
+
+          /* Monospace font */
+          "text-font": ["Noto Sans Mono Regular"],
+
           "text-size": [
             "interpolate",
             ["linear"],
             ["zoom"],
-            6, 10,
+            6, 11,
             10, 14,
             16, 18
           ],
@@ -91,29 +97,26 @@ const map = new maplibregl.Map({
   }
 });
 
-// -------------------------------
-// Cursor feedback
-// -------------------------------
+/* -----------------------------------
+   Cursor feedback
+----------------------------------- */
 
 map.on("mouseenter", "sites", () => {
   map.getCanvas().style.cursor = "pointer";
 });
-
 map.on("mouseleave", "sites", () => {
   map.getCanvas().style.cursor = "";
 });
-
 map.on("mouseenter", "site-labels", () => {
   map.getCanvas().style.cursor = "pointer";
 });
-
 map.on("mouseleave", "site-labels", () => {
   map.getCanvas().style.cursor = "";
 });
 
-// -------------------------------
-// Click → viewer navigation
-// -------------------------------
+/* -----------------------------------
+   Click → viewer navigation
+----------------------------------- */
 
 function handleSiteClick(e) {
   const feature = e.features && e.features[0];
@@ -123,20 +126,15 @@ function handleSiteClick(e) {
   }
 
   const reefId = feature.properties.id;
-
-  // Navigate to viewer
   window.location.href = `viewer.html?id=${reefId}`;
 }
 
-// Click on point
 map.on("click", "sites", handleSiteClick);
-
-// Click on label
 map.on("click", "site-labels", handleSiteClick);
 
-// -------------------------------
-// Optional: scale bar (overview context)
-// -------------------------------
+/* -----------------------------------
+   Optional scale bar
+----------------------------------- */
 
 map.addControl(
   new maplibregl.ScaleControl({
