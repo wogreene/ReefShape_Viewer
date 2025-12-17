@@ -94,7 +94,8 @@ map.on("load", async () => {
       "text-field": ["get", "name"],
       "text-size": 14,
       "text-offset": [0, 1.2],
-      "text-anchor": "top"
+      "text-anchor": "top",
+      "text-font": ["Open Sans Regular"]
     },
     paint: {
       "text-color": "#ffffff",
