@@ -43,13 +43,13 @@ const view = new View({
     (bounds[0] + bounds[2]) / 2,
     (bounds[1] + bounds[3]) / 2
   ],
-  zoom: 21,
-  maxZoom: 30,
+  zoom: 17,
+  maxZoom: 28,
   constrainResolution: false
 });
 
 // --------------------------------------------------
-// GeoTIFF source factory (CRITICAL FIXES HERE)
+// GeoTIFF source factory (CORRECT CONFIGURATION)
 // --------------------------------------------------
 
 function makeGeoTIFFSource(url) {
@@ -57,12 +57,12 @@ function makeGeoTIFFSource(url) {
     sources: [
       {
         url,
-        bands: [1, 2, 3],
-        noData: 0
+        bands: [1, 2, 3]
+        // ❌ DO NOT set noData for RGB imagery
       }
     ],
 
-    // 🔑 DO NOT normalize RGB imagery
+    // 🔑 Prevent color stretching
     normalize: false
   });
 }
@@ -97,7 +97,7 @@ const map = new Map({
 });
 
 // --------------------------------------------------
-// Correct OpenLayers scalebar (already verified)
+// Correct OpenLayers scalebar (styled via CSS)
 // --------------------------------------------------
 
 map.addControl(
