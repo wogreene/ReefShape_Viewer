@@ -38,7 +38,7 @@ const STYLE = {
       id: "basemap-labels",
       type: "raster",
       source: "esri-labels",
-      maxzoom: 13   // hide basemap labels when zoomed in
+      maxzoom: 16   // hide basemap labels when zoomed in
     }
   ]
 };
@@ -82,7 +82,7 @@ map.on("load", async () => {
     }
   });
 
-  // Reef labels (Roboto Regular, auto-hide at high zoom)
+  // Reef labels (stable default font)
   map.addLayer({
     id: "site-labels",
     type: "symbol",
@@ -92,10 +92,6 @@ map.on("load", async () => {
 
     layout: {
       "text-field": ["get", "name"],
-
-      // ✅ Supported font on MapLibre demo glyph server
-      "text-font": ["Roboto Regular"],
-
       "text-size": 14,
       "text-offset": [0, 1.2],
       "text-anchor": "top"
@@ -109,7 +105,7 @@ map.on("load", async () => {
 });
 
 // ---------------------------
-// Click → viewer page
+// Click → viewer
 // ---------------------------
 
 map.on("click", "sites", e => {
