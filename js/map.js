@@ -1,111 +1,126 @@
 // js/map.js
-// Overview map with clickable reef points → viewer.html?id=...
+
+const STYLE = {
+  version: 8,
+
+  // REQUIRED for any text labels
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+
+  sources: {
+    "esri-satellite": {
+      type: "raster",
+      tiles: [
+        "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+      ],
+      tileSize: 256,
+      maxzoom: 18
+    },
+    "esri-labels": {
+      type: "raster",
+      tiles: [
+        "https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
+      ],
+      tileSize: 256,
+      maxzoom: 18
+    }
+  },
+
+  layers: [
+    {
+      id: "satellite",
+      type: "raster",
+      source: "esri-satellite",
+      paint: {
+        "raster-resampling": "linear"
+      }
+    },
+    {
+      id: "basemap-labels",
+      type: "raster",
+      source: "esri-labels",
+      maxzoom: 13   // hide basemap labels when zoomed in
+    }
+  ]
+};
 
 const map = new maplibregl.Map({
   container: "map",
-  center: [-79.21, 25.42], // adjust as needed
+  center: [-79.21, 25.42],
   zoom: 10,
-  minZoom: 2,
-  maxZoom: 22,
-
-  style: {
-    version: 8,
-
-    // 🔑 REQUIRED for text rendering
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-
-    sources: {
-      /* ---------- Satellite basemap ---------- */
-      "esri-satellite": {
-        type: "raster",
-        tiles: [
-          "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-        ],
-        tileSize: 256,
-        maxzoom: 18
-      },
-
-      /* ---------- Reef sites ---------- */
-      "sites": {
-        type: "geojson",
-        data: "data/sites.geojson"
-      }
-    },
-
-    layers: [
-      /* ---------- Satellite base ---------- */
-      {
-        id: "satellite",
-        type: "raster",
-        source: "esri-satellite",
-        paint: {
-          "raster-resampling": "linear"
-        }
-      },
-
-      /* ---------- Reef points ---------- */
-      {
-        id: "sites",
-        type: "circle",
-        source: "sites",
-        paint: {
-          "circle-radius": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            4, 4,
-            8, 6,
-            12, 10,
-            18, 16
-          ],
-          "circle-color": "#ffffff",
-          "circle-stroke-color": "#000000",
-          "circle-stroke-width": 1.5
-        }
-      },
-
-      /* ---------- Reef labels (Roboto Regular) ---------- */
-      {
-        id: "site-labels",
-        type: "symbol",
-        source: "sites",
-        layout: {
-          "text-field": ["get", "name"],
-
-          // ✅ Supported by glyph server
-          "text-font": ["Roboto Regular"],
-
-          "text-size": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            6, 11,
-            10, 14,
-            16, 18
-          ],
-          "text-offset": [0, 1.2],
-          "text-anchor": "top",
-          "text-allow-overlap": false
-        },
-        paint: {
-          "text-color": "#ffffff",
-          "text-halo-color": "#000000",
-          "text-halo-width": 2
-        }
-      }
-    ]
-  }
+  minZoom: 0,
+  maxZoom: 26,
+  style: STYLE
 });
 
-/* -----------------------------------
-   Cursor feedback
------------------------------------ */
+// Scale bar
+map.addControl(
+  new maplibregl.ScaleControl({
+    maxWidth: 120,
+    unit: "metric"
+  }),
+  "bottom-right"
+);
+
+map.on("load", async () => {
+  const sites = await fetch("data/sites.geojson").then(r => r.json());
+
+  map.addSource("sites", {
+    type: "geojson",
+    data: sites
+  });
+
+  // Reef points
+  map.addLayer({
+    id: "sites",
+    type: "circle",
+    source: "sites",
+    paint: {
+      "circle-radius": 6,
+      "circle-color": "#ff6600",
+      "circle-stroke-width": 1,
+      "circle-stroke-color": "#ffffff"
+    }
+  });
+
+  // Reef labels (Roboto Regular, auto-hide at high zoom)
+  map.addLayer({
+    id: "site-labels",
+    type: "symbol",
+    source: "sites",
+    minzoom: 6,
+    maxzoom: 18,   // hide reef labels once zoomed in
+
+    layout: {
+      "text-field": ["get", "name"],
+
+      // ✅ Supported font on MapLibre demo glyph server
+      "text-font": ["Roboto Regular"],
+
+      "text-size": 14,
+      "text-offset": [0, 1.2],
+      "text-anchor": "top"
+    },
+    paint: {
+      "text-color": "#ffffff",
+      "text-halo-color": "#000000",
+      "text-halo-width": 1.5
+    }
+  });
+});
+
+// ---------------------------
+// Click → viewer page
+// ---------------------------
+
+map.on("click", "sites", e => {
+  const id = e.features[0].properties.id;
+  window.location.href = `viewer.html?id=${id}`;
+});
 
 map.on("mouseenter", "sites", () => {
   map.getCanvas().style.cursor = "pointer";
 });
+
 map.on("mouseleave", "sites", () => {
   map.getCanvas().style.cursor = "";
 });
-map.on("mouseenter", "site-labels", () => {
-  map.getCanvas().style.cursor = "poin
