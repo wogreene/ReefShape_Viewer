@@ -48,8 +48,8 @@ const view = new View({
     (bounds[1] + bounds[3]) / 2
   ],
 
-  zoom: 17,
-  maxZoom: 28,
+  zoom: 20,
+  maxZoom: 30,
   constrainResolution: false,
 
   // Slight padding beyond data bounds to avoid edge clipping
