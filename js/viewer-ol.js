@@ -1,41 +1,119 @@
 // js/viewer-ol.js
-// OpenLayers GeoTIFF viewer (correct WebGL setup)
 
 import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
 import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
+import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 
-// Your COG URL
-const COG_URL =
-  "https://dl.dropboxusercontent.com/scl/fi/6o939vhxcpxtrw4qcg9xx/BullRun_20251103_cog.tif?rlkey=cz07p9uq4p4al5ww5wzdf4ick";
+// --------------------------------------------------
+// Read reef ID from URL
+// --------------------------------------------------
 
-// GeoTIFF source (explicit RGB bands)
-const reefSource = new GeoTIFF({
-  sources: [
-    {
-      url: COG_URL,
-      bands: [1, 2, 3]
-    }
-  ]
+const params = new URLSearchParams(window.location.search);
+const reefId = params.get("id");
+
+if (!reefId) {
+  alert("No reef id specified");
+  throw new Error("Missing reef id");
+}
+
+// --------------------------------------------------
+// Load site metadata
+// --------------------------------------------------
+
+const sites = await fetch("data/sites.geojson").then(r => r.json());
+
+const feature = sites.features.find(
+  f => f.properties.id === reefId
+);
+
+if (!feature) {
+  alert("Reef not found");
+  throw new Error("Invalid reef id");
+}
+
+const { timepoints, bounds } = feature.properties;
+const years = Object.keys(timepoints);
+
+// --------------------------------------------------
+// Create map view (CRS-native)
+// --------------------------------------------------
+
+const view = new View({
+  projection: "EPSG:4326",
+
+  center: [
+    (bounds[0] + bounds[2]) / 2,
+    (bounds[1] + bounds[3]) / 2
+  ],
+
+  zoom: 17
 });
 
-// 🔑 MUST be WebGLTileLayer
-const reefLayer = new WebGLTileLayer({
-  source: reefSource
+// --------------------------------------------------
+// Initial GeoTIFF layer
+// --------------------------------------------------
+
+let reefLayer = new WebGLTileLayer({
+  source: new GeoTIFF({
+    sources: [
+      {
+        url: timepoints[years[0]],
+        bands: [1, 2, 3]
+      }
+    ]
+  })
 });
 
-// Create the map
+// --------------------------------------------------
+// Create map
+// --------------------------------------------------
+
 const map = new Map({
   target: "map",
   layers: [reefLayer],
-  view: new View({
-    projection: "EPSG:4326",
+  view: view,
+  controls: [
+    // Dynamic scalebar (metric)
+    new ScaleLine({
+      units: "metric",
+      bar: true,
+      steps: 4,
+      text: true,
+      minWidth: 100
+    })
+  ]
+});
 
-    // Approximate reef center
-    center: [-79.2479, 25.4535],
+// --------------------------------------------------
+// Populate timepoint selector
+// --------------------------------------------------
 
-    // Initial zoom
-    zoom: 17
-  })
+const select = document.getElementById("timepointSelect");
+
+years.forEach(y => {
+  const opt = document.createElement("option");
+  opt.value = y;
+  opt.textContent = y;
+  select.appendChild(opt);
+});
+
+// --------------------------------------------------
+// Timepoint switching (preserves view)
+// --------------------------------------------------
+
+select.addEventListener("change", () => {
+  const year = select.value;
+
+  const newSource = new GeoTIFF({
+    sources: [
+      {
+        url: timepoints[year],
+        bands: [1, 2, 3]
+      }
+    ]
+  });
+
+  reefLayer.setSource(newSource);
 });
