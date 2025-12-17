@@ -37,7 +37,7 @@ const { timepoints, bounds } = feature.properties;
 const years = Object.keys(timepoints);
 
 // --------------------------------------------------
-// Create map view (CRS-native)
+// View: allow deeper zoom than native resolution
 // --------------------------------------------------
 
 const view = new View({
@@ -48,7 +48,13 @@ const view = new View({
     (bounds[1] + bounds[3]) / 2
   ],
 
-  zoom: 19
+  zoom: 22,
+
+  // 🔑 Allow zooming beyond native resolution
+  maxZoom: 30,
+
+  // 🔑 Do NOT constrain resolution snapping
+  constrainResolution: false
 });
 
 // --------------------------------------------------
@@ -63,7 +69,10 @@ let reefLayer = new WebGLTileLayer({
         bands: [1, 2, 3]
       }
     ]
-  })
+  }),
+
+  // 🔑 Smooth magnification when zooming past native resolution
+  interpolate: true
 });
 
 // --------------------------------------------------
@@ -75,13 +84,12 @@ const map = new Map({
   layers: [reefLayer],
   view: view,
   controls: [
-    // Dynamic scalebar (metric)
     new ScaleLine({
       units: "metric",
       bar: true,
       steps: 4,
       text: true,
-      minWidth: 100
+      minWidth: 140
     })
   ]
 });
@@ -106,14 +114,14 @@ years.forEach(y => {
 select.addEventListener("change", () => {
   const year = select.value;
 
-  const newSource = new GeoTIFF({
-    sources: [
-      {
-        url: timepoints[year],
-        bands: [1, 2, 3]
-      }
-    ]
-  });
-
-  reefLayer.setSource(newSource);
+  reefLayer.setSource(
+    new GeoTIFF({
+      sources: [
+        {
+          url: timepoints[year],
+          bands: [1, 2, 3]
+        }
+      ]
+    })
+  );
 });
