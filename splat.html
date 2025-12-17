@@ -53,10 +53,9 @@
 
   <div id="viewer"></div>
 
-  <!-- SuperSplat Viewer -->
   <script type="module">
     import { Viewer } from
-      "https://cdn.jsdelivr.net/gh/playcanvas/supersplat-viewer@main/dist/supersplat.js";
+      "https://cdn.jsdelivr.net/gh/playcanvas/supersplat-viewer@0.7.0/dist/supersplat.js";
 
     const viewer = new Viewer({
       container: document.getElementById("viewer"),
@@ -64,7 +63,7 @@
       showStats: false
     });
 
-    // 🔴 Replace with your actual SuperSpl.at FILE URL
+    // 🔴 MUST be the *file* URL, not the view URL
     viewer.load(
       "https://superspl.at/api/file/20e48446"
     );
