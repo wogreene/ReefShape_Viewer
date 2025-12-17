@@ -2,13 +2,10 @@
 
 import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
-import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
+import TileLayer from "https://esm.sh/ol@latest/layer/Tile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
-import TileQueue from 'ol/TileQueue';
-
-TileQueue.prototype.maxTilesLoading_ = 4;
 
 // --------------------------------------------------
 // Read reef ID
@@ -52,19 +49,26 @@ const view = new View({
 });
 
 // --------------------------------------------------
-// Layer
+// GeoTIFF source factory (stable, image-based)
 // --------------------------------------------------
 
-const reefLayer = new WebGLTileLayer({
-  source: new GeoTIFF({
-    sources: [{ url: timepoints[years[0]], bands: [1, 2, 3] }]
-  }),
-  renderMode: "image",
-  interpolate: true,
-  preload: 2,
-  transition: 0,
-  cacheSize: 512,
-  nodata: 0
+function createGeoTIFFSource(url) {
+  return new GeoTIFF({
+    sources: [{ url, bands: [1, 2, 3] }],
+    renderMode: "image",   // 🔑 eliminates diagonal triangle artifacts
+    interpolate: true,     // allow blur instead of seams
+    nodata: 0
+  });
+}
+
+// --------------------------------------------------
+// Layer (IMAGE tiles, not WebGL)
+// --------------------------------------------------
+
+const reefLayer = new TileLayer({
+  source: createGeoTIFFSource(timepoints[years[0]]),
+  preload: 2,        // reduces edge seams
+  transition: 0
 });
 
 // --------------------------------------------------
@@ -83,6 +87,9 @@ const map = new Map({
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
 });
 
+// Black background for NoData areas
+map.getViewport().style.background = "black";
+
 // --------------------------------------------------
 // Correct OpenLayers scalebar (styled via CSS)
 // --------------------------------------------------
@@ -98,7 +105,7 @@ map.addControl(
 );
 
 // --------------------------------------------------
-// Timepoint selector
+// Timepoint selector (preserve view extent)
 // --------------------------------------------------
 
 const select = document.getElementById("timepointSelect");
@@ -110,11 +117,7 @@ years.forEach(y => {
 });
 
 select.addEventListener("change", () => {
-  reefLayer.setSource(
-    new GeoTIFF({
-      sources: [{ url: timepoints[select.value], bands: [1, 2, 3] }]
-    })
-  );
+  reefLayer.setSource(createGeoTIFFSource(timepoints[select.value]));
 });
 
 // --------------------------------------------------
