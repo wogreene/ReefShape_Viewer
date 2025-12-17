@@ -6,6 +6,7 @@ import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
+import { defaults as defaultInteractions } from "https://esm.sh/ol@latest/interaction/defaults.js";
 import DragRotate from "https://esm.sh/ol@latest/interaction/DragRotate.js";
 import { platformModifierKeyOnly } from "https://esm.sh/ol@latest/events/condition.js";
 
@@ -61,29 +62,26 @@ function createGeoTIFFSource(url) {
       url,
       bands: [1, 2, 3]
     }],
-    interpolate: true,   // blur instead of seams
+    interpolate: true,
     nodata: 0,
     wrapX: false
   });
 }
 
 // --------------------------------------------------
-// WebGLTileLayer (ONLY supported option)
+// WebGLTileLayer (supported + stable)
 // --------------------------------------------------
 
 const reefLayer = new WebGLTileLayer({
   source: createGeoTIFFSource(timepoints[years[0]]),
-
-  // Artifact mitigation
-  transition: 0,                // no cross-fade flicker
-  cacheSize: 256,               // limit GPU pressure
-  useInterimTilesOnError: false // no corrupted fallbacks
+  transition: 0,
+  cacheSize: 256,
+  useInterimTilesOnError: false
 });
 
 // --------------------------------------------------
-// Map
+// Map (with correct interaction setup)
 // --------------------------------------------------
-import { defaults as defaultInteractions } from "https://esm.sh/ol@latest/interaction/defaults.js";
 
 const map = new Map({
   target: "map",
@@ -94,28 +92,29 @@ const map = new Map({
     rotate: false,
     attribution: false
   }),
-  interactions: [
-    // default interactions, but WITHOUT default rotation
-    ...defaultInteractions({
-      altShiftDragRotate: false,
-      pinchRotate: true,
-      onFocusOnly: true
-    }),
-
-    // 🔑 Cmd (macOS) or Ctrl (Win/Linux) + drag = rotate
-    new DragRotate({
-      condition: platformModifierKeyOnly
-    })
-  ],
+  interactions: defaultInteractions({
+    altShiftDragRotate: false, // disable default alt rotation
+    pinchRotate: true,         // keep mobile rotation
+    onFocusOnly: true
+  }),
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
 });
 
+// --------------------------------------------------
+// Cmd (macOS) / Ctrl (Win/Linux) + drag rotation
+// --------------------------------------------------
 
-// Black background for NoData
+map.addInteraction(
+  new DragRotate({
+    condition: platformModifierKeyOnly
+  })
+);
+
+// Black background for NoData areas
 map.getViewport().style.background = "black";
 
 // --------------------------------------------------
-// Scalebar
+// Scalebar (styled via CSS)
 // --------------------------------------------------
 
 map.addControl(
@@ -129,7 +128,7 @@ map.addControl(
 );
 
 // --------------------------------------------------
-// Timepoint selector (preserve view)
+// Timepoint selector (preserve view extent)
 // --------------------------------------------------
 
 const select = document.getElementById("timepointSelect");
