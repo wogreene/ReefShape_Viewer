@@ -21,6 +21,24 @@
     {
       "type": "Feature",
       "properties": {
+        "id": "lobohoras",
+        "name": "Lobo Horas",
+
+        "bounds": [-79.2255438980711801,25.4003844450776839,-79.2253517054830922,25.4005483573436841],
+
+        "timepoints": {
+          "20250325": "https://dl.dropboxusercontent.com/scl/fi/vuhghn20lwl2tr0pm3uwv/LoboHoras_24_20250325_cog.tif?rlkey=y8g3bs8pn49v8khxry2kyi6nm",
+          "20250502": "https://dl.dropboxusercontent.com/scl/fi/7rlu4jszkyiwfccuvp7dc/LoboHoras_24_20250502_cog.tif?rlkey=1kr5rezbgyv9ri6w7yixivvq6",
+        }
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-79.2253, 25.4004]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
         "id": "victoryreef",
         "name": "Victory Reef",
 
