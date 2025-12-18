@@ -76,7 +76,7 @@ function createGeoTIFFSource(url) {
 const reefLayer = new WebGLTileLayer({
   source: createGeoTIFFSource(timepoints[years[0]]),
   transition: 0,
-  cacheSize: 256,
+  cacheSize: 128,
   useInterimTilesOnError: true
 });
 
@@ -98,7 +98,7 @@ const map = new Map({
     pinchRotate: true,         // keep mobile rotation
     onFocusOnly: true
   }),
-  pixelRatio: /Mac|iPhone|iPad/.test(navigator.platform) ? 1 : Math.min(window.devicePixelRatio || 1, 2),
+  pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
 });
 
 // --------------------------------------------------
