@@ -63,7 +63,7 @@ function createGeoTIFFSource(url) {
       url,
       bands: [1, 2, 3]
     }],
-    interpolate: false,
+    interpolate: true,
     nodata: 0,
     wrapX: false
   });
@@ -98,7 +98,7 @@ const map = new Map({
     pinchRotate: true,         // keep mobile rotation
     onFocusOnly: true
   }),
-  pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
+  pixelRatio: /Mac|iPhone|iPad/.test(navigator.platform) ? 1 : Math.min(window.devicePixelRatio || 1, 2),
 });
 
 // --------------------------------------------------
