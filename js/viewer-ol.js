@@ -65,7 +65,8 @@ function createGeoTIFFSource(url) {
     }],
     interpolate: true,
     nodata: 0,
-    wrapX: false
+    wrapX: false,
+    preload: Infinity
   });
 }
 
@@ -76,8 +77,9 @@ function createGeoTIFFSource(url) {
 const reefLayer = new WebGLTileLayer({
   source: createGeoTIFFSource(timepoints[years[0]]),
   transition: 0,
-  cacheSize: 128,
-  useInterimTilesOnError: true
+  cacheSize: 256,
+  useInterimTilesOnError: true,
+  buffer: 1
 });
 
 // --------------------------------------------------
