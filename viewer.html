@@ -138,7 +138,25 @@
   </style>
 </head>
 <body>
+<!-- Mac / iOS warning icon -->
+<div id="macWarningIcon" class="warning-icon" style="display:none;">
+  ⚠️
+</div>
 
+<!-- warning popup modal -->
+<div id="macWarningModal" class="warning-modal" style="display:none;">
+  <div class="warning-box">
+    <h2>Rendering Warning</h2>
+    <p>
+      This map has known rendering issues on
+      macOS &amp; iOS browsers due to WebGL limitations.<br><br>
+      If you see flickering triangles or incomplete tiles,
+      try panning/zooming to refresh the view.<br><br>
+      For best performance, visit this page from a PC or Android.
+    </p>
+    <button id="macWarningClose">Close</button>
+  </div>
+</div>
 <div id="map"></div>
 
 <div class="viewer-ui">
