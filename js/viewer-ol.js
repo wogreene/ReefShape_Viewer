@@ -5,6 +5,7 @@ import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
 import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import TileLayer from "https://esm.sh/ol@latest/layer/Tile.js";
+import RasterSource from "https://esm.sh/ol@latest/source/Raster.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
@@ -75,6 +76,7 @@ function createGeoTIFFSource(url) {
 // WebGLTileLayer (supported + stable)
 // --------------------------------------------------
 
+// detect Mac / iOS
 const isApple =
   /Mac|iPhone|iPad|iPod/.test(navigator.platform) ||
   (/Mac/).test(navigator.userAgent);
@@ -82,12 +84,20 @@ const isApple =
 let reefLayer;
 
 if (isApple) {
-  reefLayer = new TileLayer({
-    source: createGeoTIFFSource(timepoints[years[0]]),
-    preload: Infinity,
-    visible: true
+  import RasterSource from "https://esm.sh/ol@latest/source/Raster.js";
+
+  const raster = new RasterSource({
+    sources: [createGeoTIFFSource(timepoints[years[0]])],
+    operation: (pixels) => pixels[0],
   });
-  console.log("Using Canvas TileLayer (Apple fallback)");
+
+  reefLayer = new TileLayer({
+    source: raster,
+    preload: Infinity,
+    visible: true,
+  });
+
+  console.log("Using Raster fallback mode on Apple platforms");
 } else {
   reefLayer = new WebGLTileLayer({
     source: createGeoTIFFSource(timepoints[years[0]]),
@@ -96,6 +106,7 @@ if (isApple) {
     useInterimTilesOnError: true,
     buffer: 1
   });
+
   console.log("Using WebGLTileLayer (default mode)");
 }
 
