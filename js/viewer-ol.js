@@ -4,8 +4,6 @@
 import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
 import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
-import TileLayer from "https://esm.sh/ol@latest/layer/Tile.js";
-import RasterSource from "https://esm.sh/ol@latest/source/Raster.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
@@ -42,6 +40,7 @@ const years = Object.keys(timepoints);
 // --------------------------------------------------
 // View
 // --------------------------------------------------
+const isApple = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 const view = new View({
   projection: "EPSG:4326",
@@ -50,7 +49,7 @@ const view = new View({
     (bounds[1] + bounds[3]) / 2
   ],
   zoom: 22,
-  maxZoom: 29,
+  maxZoom: isApple ? 25 : 29,
   constrainResolution: false,
   smoothResolutionConstraint: true
 });
@@ -65,7 +64,7 @@ function createGeoTIFFSource(url) {
       url,
       bands: [1, 2, 3]
     }],
-    interpolate: true,
+    interpolate: !isApple,
     nodata: 0,
     wrapX: false,
     preload: Infinity
@@ -76,48 +75,13 @@ function createGeoTIFFSource(url) {
 // WebGLTileLayer (supported + stable)
 // --------------------------------------------------
 
-// detect Mac / iOS
-// --------------------------------------------------
-// WebGLTile on PC, Raster Canvas fallback on Apple devices
-// --------------------------------------------------
-
-const isApple =
-  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ||
-  (/Mac/).test(navigator.userAgent);
-
-let reefLayer;
-
-if (isApple) {
-  // Raster fallback mode
-  const raster = new RasterSource({
-    sources: [
-      createGeoTIFFSource(timepoints[years[0]])
-    ],
-    operation: (pixels) => pixels[0], // passthrough band mapping
-  });
-
-  reefLayer = new TileLayer({
-    source: raster,
-    preload: Infinity,
-    opacity: 1
-  });
-
-  console.log("Raster fallback enabled on Apple platforms");
-  
-} else {
-
-  // Default WebGL fast path
-  reefLayer = new WebGLTileLayer({
-    source: createGeoTIFFSource(timepoints[years[0]]),
-    transition: 0,
-    cacheSize: 256,
-    useInterimTilesOnError: true,
-    buffer: 1
-  });
-
-  console.log("WebGLTileLayer enabled on non-Apple platforms");
-}
-
+const reefLayer = new WebGLTileLayer({
+  source: createGeoTIFFSource(timepoints[years[0]]),
+  transition: 0,
+  cacheSize: 256,
+  useInterimTilesOnError: true,
+  buffer: 1
+});
 
 // --------------------------------------------------
 // Map (with correct interaction setup)
@@ -137,7 +101,7 @@ const map = new Map({
     pinchRotate: true,         // keep mobile rotation
     onFocusOnly: true
   }),
-  pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
+  pixelRatio: isApple ? 1 : Math.min(window.devicePixelRatio || 1, 2),
 });
 
 // --------------------------------------------------
