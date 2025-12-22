@@ -49,7 +49,7 @@ const view = new View({
     (bounds[1] + bounds[3]) / 2
   ],
   zoom: 22,
-  maxZoom: 29,
+  maxZoom: isApple ? 28 : 29,
   constrainResolution: false,
   smoothResolutionConstraint: true
 });
@@ -78,7 +78,7 @@ function createGeoTIFFSource(url) {
 const reefLayer = new WebGLTileLayer({
   source: createGeoTIFFSource(timepoints[years[0]]),
   transition: 0,
-  cacheSize: 64,
+  cacheSize: 256,
   useInterimTilesOnError: true,
   buffer: 3
 });
