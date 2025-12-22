@@ -77,6 +77,10 @@ function createGeoTIFFSource(url) {
 // --------------------------------------------------
 
 // detect Mac / iOS
+// --------------------------------------------------
+// WebGLTile on PC, Raster Canvas fallback on Apple devices
+// --------------------------------------------------
+
 const isApple =
   /Mac|iPhone|iPad|iPod/.test(navigator.platform) ||
   (/Mac/).test(navigator.userAgent);
@@ -84,21 +88,25 @@ const isApple =
 let reefLayer;
 
 if (isApple) {
-  import RasterSource from "https://esm.sh/ol@latest/source/Raster.js";
-
+  // Raster fallback mode
   const raster = new RasterSource({
-    sources: [createGeoTIFFSource(timepoints[years[0]])],
-    operation: (pixels) => pixels[0],
+    sources: [
+      createGeoTIFFSource(timepoints[years[0]])
+    ],
+    operation: (pixels) => pixels[0], // passthrough band mapping
   });
 
   reefLayer = new TileLayer({
     source: raster,
     preload: Infinity,
-    visible: true,
+    opacity: 1
   });
 
-  console.log("Using Raster fallback mode on Apple platforms");
+  console.log("Raster fallback enabled on Apple platforms");
+  
 } else {
+
+  // Default WebGL fast path
   reefLayer = new WebGLTileLayer({
     source: createGeoTIFFSource(timepoints[years[0]]),
     transition: 0,
@@ -107,8 +115,9 @@ if (isApple) {
     buffer: 1
   });
 
-  console.log("Using WebGLTileLayer (default mode)");
+  console.log("WebGLTileLayer enabled on non-Apple platforms");
 }
+
 
 // --------------------------------------------------
 // Map (with correct interaction setup)
