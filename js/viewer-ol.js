@@ -4,6 +4,7 @@
 import Map from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
 import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
+import TileLayer from "https://esm.sh/ol@latest/layer/Tile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
 import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
 import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
@@ -74,13 +75,29 @@ function createGeoTIFFSource(url) {
 // WebGLTileLayer (supported + stable)
 // --------------------------------------------------
 
-const reefLayer = new WebGLTileLayer({
-  source: createGeoTIFFSource(timepoints[years[0]]),
-  transition: 0,
-  cacheSize: 256,
-  useInterimTilesOnError: true,
-  buffer: 1
-});
+const isApple =
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ||
+  (/Mac/).test(navigator.userAgent);
+
+let reefLayer;
+
+if (isApple) {
+  reefLayer = new TileLayer({
+    source: createGeoTIFFSource(timepoints[years[0]]),
+    preload: Infinity,
+    visible: true
+  });
+  console.log("Using Canvas TileLayer (Apple fallback)");
+} else {
+  reefLayer = new WebGLTileLayer({
+    source: createGeoTIFFSource(timepoints[years[0]]),
+    transition: 0,
+    cacheSize: 256,
+    useInterimTilesOnError: true,
+    buffer: 1
+  });
+  console.log("Using WebGLTileLayer (default mode)");
+}
 
 // --------------------------------------------------
 // Map (with correct interaction setup)
