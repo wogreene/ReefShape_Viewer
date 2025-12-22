@@ -138,6 +138,19 @@
   </style>
 </head>
 <body>
+<div id="map"></div>
+
+<div class="viewer-ui">
+  <a class="back-link" href="./index.html">←</a>
+
+  <button id="zoomOut">−</button>
+  <button id="zoomIn">+</button>
+
+  Time:
+  <select id="timepointSelect"></select>
+</div>
+
+<script type="module" src="js/viewer-ol.js"></script>
 <!-- Mac / iOS warning icon -->
 <div id="macWarningIcon" class="warning-icon" style="display:none;">
   ⚠️
@@ -157,18 +170,5 @@
     <button id="macWarningClose">Close</button>
   </div>
 </div>
-<div id="map"></div>
-
-<div class="viewer-ui">
-  <a class="back-link" href="./index.html">←</a>
-
-  <button id="zoomOut">−</button>
-  <button id="zoomIn">+</button>
-
-  Time:
-  <select id="timepointSelect"></select>
-</div>
-
-<script type="module" src="js/viewer-ol.js"></script>
 </body>
 </html>
