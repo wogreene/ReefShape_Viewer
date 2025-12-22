@@ -49,7 +49,7 @@ const view = new View({
     (bounds[1] + bounds[3]) / 2
   ],
   zoom: 22,
-  maxZoom: isApple ? 25 : 29,
+  maxZoom: 29,
   constrainResolution: false,
   smoothResolutionConstraint: true
 });
@@ -78,9 +78,9 @@ function createGeoTIFFSource(url) {
 const reefLayer = new WebGLTileLayer({
   source: createGeoTIFFSource(timepoints[years[0]]),
   transition: 0,
-  cacheSize: 256,
+  cacheSize: 128,
   useInterimTilesOnError: true,
-  buffer: 1
+  buffer: 3
 });
 
 // --------------------------------------------------
@@ -101,7 +101,7 @@ const map = new Map({
     pinchRotate: true,         // keep mobile rotation
     onFocusOnly: true
   }),
-  pixelRatio: isApple ? 1 : Math.min(window.devicePixelRatio || 1, 2),
+  pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
 });
 
 // --------------------------------------------------
