@@ -241,8 +241,9 @@ button:active {
   top: 10px;
   right: 15px;
   font-size: 26px;
+  border: 3px solid red;
   cursor: pointer;
-  z-index: 9999;
+  z-index: 999999;
   user-select: none;
   color: #ffcc00;
 }
@@ -258,7 +259,7 @@ button:active {
   display: flex;
   justify-content: center;
   align-items: center;
-  z-index: 10000;
+  z-index: 999998;
 }
 
 /* popup box */
