@@ -158,3 +158,23 @@ document.getElementById("zoomIn").onclick = () => {
 document.getElementById("zoomOut").onclick = () => {
   view.setZoom(view.getZoom() - 1);
 };
+
+// --------------------------------------------------
+// mac / iOS warning system
+// --------------------------------------------------
+
+const isMacOrIOS =
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform) ||
+  /(Macintosh|iPhone|iPad)/.test(navigator.userAgent);
+
+if (isMacOrIOS) {
+  document.getElementById("macWarningIcon").style.display = "block";
+}
+
+document.getElementById("macWarningIcon").onclick = () => {
+  document.getElementById("macWarningModal").style.display = "flex";
+};
+
+document.getElementById("macWarningClose").onclick = () => {
+  document.getElementById("macWarningModal").style.display = "none";
+};
