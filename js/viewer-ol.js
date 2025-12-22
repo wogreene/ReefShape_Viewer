@@ -64,7 +64,7 @@ function createGeoTIFFSource(url) {
       url,
       bands: [1, 2, 3]
     }],
-    interpolate: !isApple,
+    interpolate: true,
     nodata: 0,
     wrapX: false,
     preload: Infinity
@@ -78,7 +78,7 @@ function createGeoTIFFSource(url) {
 const reefLayer = new WebGLTileLayer({
   source: createGeoTIFFSource(timepoints[years[0]]),
   transition: 0,
-  cacheSize: 128,
+  cacheSize: 64,
   useInterimTilesOnError: true,
   buffer: 3
 });
