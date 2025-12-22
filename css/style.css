@@ -237,16 +237,19 @@ button:active {
 }
 /* mac warning icon */
 .warning-icon {
-  position: absolute;
-  top: 10px;
-  right: 15px;
+  position: fixed !important;
+  top: 12px !important;
+  right: 15px !important;
   font-size: 26px;
-  border: 3px solid red;
   cursor: pointer;
-  z-index: 999999;
+  z-index: 999999 !important;
   user-select: none;
   color: #ffcc00;
+  background: rgba(0,0,0,0.6);
+  padding: 4px 6px;
+  border-radius: 4px;
 }
+
 
 /* warning modal background */
 .warning-modal {
@@ -296,10 +299,4 @@ button:active {
 .warning-box button:hover {
   background: #ffcc00;
   color: black;
-}
-#macWarningIcon {
-  position: fixed !important;
-  top: 12px !important;
-  right: 15px !important;
-  z-index: 999999 !important;
 }
