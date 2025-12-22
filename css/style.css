@@ -297,4 +297,9 @@ button:active {
   background: #ffcc00;
   color: black;
 }
-
+#macWarningIcon {
+  position: fixed !important;
+  top: 12px !important;
+  right: 15px !important;
+  z-index: 999999 !important;
+}
