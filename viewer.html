@@ -65,6 +65,23 @@
     .viewer-ui button:hover { background: #222; }
     .viewer-ui button:active { background: #444; }
 
+    /* NEW: Overlay toggle (hidden unless overlays exist for this reef+timepoint) */
+    .overlay-toggle {
+      display: none; /* shown by viewer-ol.js only when available */
+      align-items: center;
+      gap: 6px;
+      margin-left: 10px;
+      padding-left: 10px;
+      border-left: 1px solid rgba(255,255,255,0.25);
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .overlay-toggle input {
+      cursor: pointer;
+      transform: translateY(1px);
+    }
+
     /* Mac Warning Icon inside UI */
     #macWarningIcon {
       margin-left: 6px;
@@ -130,6 +147,12 @@
 
     <label for="timepointSelect">Time:</label>
     <select id="timepointSelect"></select>
+
+    <!-- NEW: overlay toggle placeholder (viewer-ol.js will show/hide + wire it up) -->
+    <label class="overlay-toggle" id="overlayToggleWrap">
+      <input type="checkbox" id="overlayToggle">
+      Overlays
+    </label>
 
     <!-- mac warning icon -->
     <span id="macWarningIcon">⚠️</span>
