@@ -1,4 +1,4 @@
-// Will Greene 12/18/2025
+// Will Greene 01/05/2026
 // js/viewer-ol.js
 
 import OLMap from "https://esm.sh/ol@latest/Map.js";
@@ -11,7 +11,7 @@ import { defaults as defaultInteractions } from "https://esm.sh/ol@latest/intera
 import DragRotate from "https://esm.sh/ol@latest/interaction/DragRotate.js";
 import { platformModifierKeyOnly } from "https://esm.sh/ol@latest/events/condition.js";
 
-// NEW: GeoJSON overlay imports
+// Overlays (vector)
 import VectorLayer from "https://esm.sh/ol@latest/layer/Vector.js";
 import VectorSource from "https://esm.sh/ol@latest/source/Vector.js";
 import GeoJSON from "https://esm.sh/ol@latest/format/GeoJSON.js";
@@ -19,7 +19,13 @@ import Style from "https://esm.sh/ol@latest/style/Style.js";
 import Stroke from "https://esm.sh/ol@latest/style/Stroke.js";
 import Fill from "https://esm.sh/ol@latest/style/Fill.js";
 
-// IMPORTANT: JS Map, not OpenLayers Map (since we renamed OLMap above)
+// Popup
+import Overlay from "https://esm.sh/ol@latest/Overlay.js";
+
+// Geodesic area fallback
+import { getArea as getGeodesicArea } from "https://esm.sh/ol@latest/sphere.js";
+
+// IMPORTANT: JS Map, not OpenLayers Map
 const JSMap = globalThis.Map;
 
 // --------------------------------------------------
@@ -51,6 +57,7 @@ const years = Object.keys(timepoints);
 // --------------------------------------------------
 // View
 // --------------------------------------------------
+
 const isApple = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 const view = new View({
@@ -83,7 +90,7 @@ function createGeoTIFFSource(url) {
 }
 
 // --------------------------------------------------
-// WebGLTileLayer (supported + stable)
+// Base raster layer
 // --------------------------------------------------
 
 const reefLayer = new WebGLTileLayer({
@@ -95,23 +102,25 @@ const reefLayer = new WebGLTileLayer({
 });
 
 // --------------------------------------------------
-// Overlay layer (GeoJSON outlines)
+// Overlay palette (species -> RGB)
 // --------------------------------------------------
 
-const overlayToggleWrap = document.getElementById("overlayToggleWrap");
-const overlayToggle = document.getElementById("overlayToggle");
-
-// Load species->RGB mapping
 const coralPalette = await fetch("data/carribean_corals.json").then(r => r.json());
 
-// Build a lookup: "Acropora_palmata" -> [255,128,0]
+// id -> [r,g,b]
 const coralColorById = new JSMap(
   (coralPalette.Labels || []).map(l => [String(l.id), l.fill])
 );
 
-// Helper: feature -> species string (tries common keys)
+// id -> human name
+const coralNameById = new JSMap(
+  (coralPalette.Labels || []).map(l => [String(l.id), l.name])
+);
+
 function getSpeciesIdFromFeature(feat) {
+  // Your overlay file uses TL_Class, so prioritize it
   const candidates = [
+    "TL_Class",
     "species",
     "Species",
     "label",
@@ -133,10 +142,16 @@ function getSpeciesIdFromFeature(feat) {
   return null;
 }
 
-// Cache styles so we don’t recreate per feature per frame
+// --------------------------------------------------
+// Overlay layer (GeoJSON outlines + fill)
+// --------------------------------------------------
+
+const overlayToggleWrap = document.getElementById("overlayToggleWrap");
+const overlayToggle = document.getElementById("overlayToggle");
+
 const styleCache = new JSMap();
 
-// Outline style by species color @ 50% opacity
+// Filled polygons using species color; black = nodata elsewhere (raster), so vector fill is fine
 function overlayStyleFn(feat) {
   const speciesId = getSpeciesIdFromFeature(feat) || "Unidentified_coral";
   const rgb =
@@ -144,21 +159,19 @@ function overlayStyleFn(feat) {
     coralColorById.get("Unidentified_coral") ||
     [255, 255, 255];
 
-  const strokeRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.5)`;
+  // Tune these if you want stronger/weaker overlay
+  const fillRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.35)`;
+  const strokeRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.85)`;
 
-  if (styleCache.has(strokeRGBA)) return styleCache.get(strokeRGBA);
+  const key = `${fillRGBA}|${strokeRGBA}`;
+  if (styleCache.has(key)) return styleCache.get(key);
 
   const style = new Style({
-    stroke: new Stroke({
-      color: strokeRGBA,
-      width: 2
-    }),
-    fill: new Fill({
-      color: "rgba(0,0,0,0)"
-    })
+    fill: new Fill({ color: fillRGBA }),
+    stroke: new Stroke({ color: strokeRGBA, width: 2 })
   });
 
-  styleCache.set(strokeRGBA, style);
+  styleCache.set(key, style);
   return style;
 }
 
@@ -168,7 +181,6 @@ const overlayLayer = new VectorLayer({
   style: overlayStyleFn
 });
 
-// IMPORTANT: use JSMap for caching sources
 const overlayCache = new JSMap();
 
 function overlayUrlFor(tp) {
@@ -198,6 +210,7 @@ function syncOverlayUI(tp) {
   if (!url) {
     if (overlayToggleWrap) overlayToggleWrap.style.display = "none";
     if (overlayToggle) overlayToggle.checked = false;
+
     overlayLayer.setVisible(false);
     overlayLayer.setSource(null);
     return;
@@ -214,7 +227,7 @@ function syncOverlayUI(tp) {
 }
 
 // --------------------------------------------------
-// Map (with correct interaction setup)
+// Map
 // --------------------------------------------------
 
 const map = new OLMap({
@@ -241,7 +254,7 @@ map.addInteraction(
   })
 );
 
-// Black background for NoData areas
+// Black background
 map.getViewport().style.background = "black";
 
 // Scalebar
@@ -256,7 +269,102 @@ map.addControl(
 );
 
 // --------------------------------------------------
-// Timepoint selector (preserve view extent)
+// Popup for coral info (species + area)
+// --------------------------------------------------
+
+// Create popup DOM (no viewer.html edits needed)
+const popupEl = document.createElement("div");
+popupEl.style.position = "absolute";
+popupEl.style.background = "rgba(0,0,0,0.9)";
+popupEl.style.color = "#fff";
+popupEl.style.border = "1px solid rgba(255,255,255,0.25)";
+popupEl.style.borderRadius = "6px";
+popupEl.style.padding = "10px 12px";
+popupEl.style.fontFamily = `"Courier New", Courier, monospace`;
+popupEl.style.fontSize = "13px";
+popupEl.style.maxWidth = "280px";
+popupEl.style.pointerEvents = "auto";
+popupEl.style.whiteSpace = "normal";
+popupEl.style.display = "none";
+
+const popupOverlay = new Overlay({
+  element: popupEl,
+  offset: [12, 12],
+  positioning: "bottom-left",
+  stopEvent: true
+});
+map.addOverlay(popupOverlay);
+
+function formatAreaCm2(feat) {
+  // Prefer TL_Area if present (already looks like cm^2 in your data)
+  const a = feat.get("TL_Area");
+  if (typeof a === "number" && isFinite(a)) return a;
+
+  // Fallback: geodesic area from geometry (m^2 -> cm^2)
+  const geom = feat.getGeometry();
+  if (!geom) return null;
+
+  const m2 = getGeodesicArea(geom, { projection: view.getProjection() });
+  const cm2 = m2 * 10000;
+  return cm2;
+}
+
+map.on("singleclick", (evt) => {
+  if (!overlayLayer.getVisible()) {
+    popupEl.style.display = "none";
+    popupOverlay.setPosition(undefined);
+    return;
+  }
+
+  let found = null;
+
+  map.forEachFeatureAtPixel(
+    evt.pixel,
+    (feat, layer) => {
+      if (layer === overlayLayer) {
+        found = feat;
+        return true;
+      }
+      return false;
+    },
+    {
+      hitTolerance: 3,
+      layerFilter: (layer) => layer === overlayLayer
+    }
+  );
+
+  if (!found) {
+    popupEl.style.display = "none";
+    popupOverlay.setPosition(undefined);
+    return;
+  }
+
+  const speciesId = getSpeciesIdFromFeature(found) || "Unidentified_coral";
+  const speciesName = coralNameById.get(speciesId) || speciesId;
+
+  const areaCm2 = formatAreaCm2(found);
+  const areaText =
+    (typeof areaCm2 === "number" && isFinite(areaCm2))
+      ? `${areaCm2.toFixed(2)} cm²`
+      : "N/A";
+
+  popupEl.innerHTML = `
+    <div style="font-weight:bold; margin-bottom:6px;">${speciesName}</div>
+    <div><span style="opacity:0.85;">Area:</span> ${areaText}</div>
+  `;
+
+  popupEl.style.display = "block";
+  popupOverlay.setPosition(evt.coordinate);
+});
+
+// Hide popup on drag (keeps it from “sticking” while panning)
+map.on("movestart", () => {
+  popupEl.style.display = "none";
+  popupOverlay.setPosition(undefined);
+});
+
+// --------------------------------------------------
+// Timepoint selector
 // --------------------------------------------------
 
 const select = document.getElementById("timepointSelect");
@@ -267,20 +375,28 @@ years.forEach(y => {
   select.appendChild(opt);
 });
 
-// init overlay UI for first timepoint
+// init overlay UI
 syncOverlayUI(years[0]);
 
 select.addEventListener("change", () => {
   const tp = select.value;
   reefLayer.setSource(createGeoTIFFSource(timepoints[tp]));
   syncOverlayUI(tp);
+
+  // Close popup when changing timepoints
+  popupEl.style.display = "none";
+  popupOverlay.setPosition(undefined);
 });
 
-// Toggle overlay on/off
+// toggle overlay on/off
 if (overlayToggle) {
   overlayToggle.addEventListener("change", () => {
     const tp = select.value;
     const url = overlayUrlFor(tp);
+
+    // Close popup whenever toggling
+    popupEl.style.display = "none";
+    popupOverlay.setPosition(undefined);
 
     if (!overlayToggle.checked || !url) {
       overlayLayer.setVisible(false);
