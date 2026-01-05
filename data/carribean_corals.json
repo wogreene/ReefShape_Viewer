@@ -1,0 +1,982 @@
+{
+  "Name": "carribean_corals",
+  "Description": "These color codes are the ones typically used by the Perry Institute for Marine Science for Caribbean coral species",
+  "Labels": [
+    {
+      "id": "Empty",
+      "name": "Empty",
+      "description": null,
+      "fill": [
+        127,
+        127,
+        127
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Unidentified_coral",
+      "name": "Unidentified_coral",
+      "description": null,
+      "fill": [
+        255,
+        255,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Acropora_cervicornis",
+      "name": "Acropora_cervicornis",
+      "description": null,
+      "fill": [
+        255,
+        162,
+        0
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Acropora_palmata",
+      "name": "Acropora_palmata",
+      "description": null,
+      "fill": [
+        255,
+        128,
+        0
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Acropora_prolifera",
+      "name": "Acropora_prolifera",
+      "description": null,
+      "fill": [
+        255,
+        174,
+        0
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Agaricia_sp.",
+      "name": "Agaricia_sp.",
+      "description": null,
+      "fill": [
+        250,
+        237,
+        0
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Agaricia_agaricites",
+      "name": "Agaricia_agaricites",
+      "description": null,
+      "fill": [
+        255,
+        221,
+        0
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Agaricia_fragilis",
+      "name": "Agaricia_fragilis",
+      "description": null,
+      "fill": [
+        255,
+        255,
+        110
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Agaricia_humilis",
+      "name": "Agaricia_humilis",
+      "description": null,
+      "fill": [
+        250,
+        247,
+        77
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Agaricia_lamarcki",
+      "name": "Agaricia_lamarcki",
+      "description": null,
+      "fill": [
+        255,
+        244,
+        31
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Agaricia_tenuifolia",
+      "name": "Agaricia_tenuifolia",
+      "description": null,
+      "fill": [
+        250,
+        227,
+        77
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Colpophyllia_natans",
+      "name": "Colpophyllia_natans",
+      "description": null,
+      "fill": [
+        172,
+        232,
+        93
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Dendrogyra_cylindrus",
+      "name": "Dendrogyra_cylindrus",
+      "description": null,
+      "fill": [
+        128,
+        255,
+        0
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Dichocoenia_stokesi",
+      "name": "Dichocoenia_stokesi",
+      "description": null,
+      "fill": [
+        0,
+        217,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Diploria_labyrinthiformis",
+      "name": "Diploria_labyrinthiformis",
+      "description": null,
+      "fill": [
+        58,
+        224,
+        169
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Eusmilia_fastigiata",
+      "name": "Eusmilia_fastigiata",
+      "description": null,
+      "fill": [
+        255,
+        0,
+        251
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Favia_fragum",
+      "name": "Favia_fragum",
+      "description": null,
+      "fill": [
+        57,
+        171,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Helioseris_cucullata",
+      "name": "Helioseris_cucullata",
+      "description": null,
+      "fill": [
+        242,
+        250,
+        0
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Isophyllia_rigida",
+      "name": "Isophyllia_rigida",
+      "description": null,
+      "fill": [
+        158,
+        131,
+        55
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Isophyllia_sinuosa",
+      "name": "Isophyllia_sinuosa",
+      "description": null,
+      "fill": [
+        166,
+        126,
+        18
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Madracis_sp.",
+      "name": "Madracis_sp.",
+      "description": null,
+      "fill": [
+        154,
+        0,
+        237
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Madracis_auretenra",
+      "name": "Madracis_auretenra",
+      "description": null,
+      "fill": [
+        158,
+        9,
+        217
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Madracis_carmabi",
+      "name": "Madracis_carmabi",
+      "description": null,
+      "fill": [
+        124,
+        89,
+        143
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Madracis_decactis",
+      "name": "Madracis_decactis",
+      "description": null,
+      "fill": [
+        198,
+        87,
+        242
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Madracis_formosa",
+      "name": "Madracis_formosa",
+      "description": null,
+      "fill": [
+        100,
+        23,
+        156
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Madracis_senaria",
+      "name": "Madracis_senaria",
+      "description": null,
+      "fill": [
+        131,
+        81,
+        166
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Manicina_areolata",
+      "name": "Manicina_areolata",
+      "description": null,
+      "fill": [
+        156,
+        240,
+        164
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Meandrina_jacksoni",
+      "name": "Meandrina_jacksoni",
+      "description": null,
+      "fill": [
+        237,
+        252,
+        207
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Meandrina_meandrites",
+      "name": "Meandrina_meandrites",
+      "description": null,
+      "fill": [
+        215,
+        245,
+        154
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Millepora_sp.",
+      "name": "Millepora_sp.",
+      "description": null,
+      "fill": [
+        209,
+        25,
+        25
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Millepora_alcicornis",
+      "name": "Millepora_alcicornis",
+      "description": null,
+      "fill": [
+        255,
+        23,
+        23
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Millepora_complanata",
+      "name": "Millepora_complanata",
+      "description": null,
+      "fill": [
+        255,
+        79,
+        79
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Millepora_squarrosa",
+      "name": "Millepora_squarrosa",
+      "description": null,
+      "fill": [
+        255,
+        122,
+        122
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Millepora_striata",
+      "name": "Millepora_striata",
+      "description": null,
+      "fill": [
+        252,
+        40,
+        76
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Montastrea_cavernosa",
+      "name": "Montastrea_cavernosa",
+      "description": null,
+      "fill": [
+        51,
+        0,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Mussa_angulosa",
+      "name": "Mussa_angulosa",
+      "description": null,
+      "fill": [
+        219,
+        13,
+        216
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Mycetophyllia_sp.",
+      "name": "Mycetophyllia_sp.",
+      "description": null,
+      "fill": [
+        82,
+        58,
+        4
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Mycetophyllia_aliciae",
+      "name": "Mycetophyllia_aliciae",
+      "description": null,
+      "fill": [
+        122,
+        100,
+        47
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Mycetophyllia_ferox",
+      "name": "Mycetophyllia_ferox",
+      "description": null,
+      "fill": [
+        110,
+        101,
+        34
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Mycetophyllia_lamarckiana",
+      "name": "Mycetophyllia_lamarckiana",
+      "description": null,
+      "fill": [
+        184,
+        150,
+        72
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Oculina_diffusa",
+      "name": "Oculina_diffusa",
+      "description": null,
+      "fill": [
+        75,
+        29,
+        99
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Orbicella_sp.",
+      "name": "Orbicella_sp.",
+      "description": null,
+      "fill": [
+        0,
+        13,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Orbicella_annularis",
+      "name": "Orbicella_annularis",
+      "description": null,
+      "fill": [
+        0,
+        195,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Orbicella_faveolata",
+      "name": "Orbicella_faveolata",
+      "description": null,
+      "fill": [
+        0,
+        136,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Orbicella_franksi",
+      "name": "Orbicella_franksi",
+      "description": null,
+      "fill": [
+        0,
+        94,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Porites_astreoides",
+      "name": "Porites_astreoides",
+      "description": null,
+      "fill": [
+        89,
+        0,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Digitate_Porites",
+      "name": "Digitate_Porites",
+      "description": null,
+      "fill": [
+        123,
+        0,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Porites_divaricata",
+      "name": "Porites_divaricata",
+      "description": null,
+      "fill": [
+        174,
+        0,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Porites_furcata",
+      "name": "Porites_furcata",
+      "description": null,
+      "fill": [
+        157,
+        0,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Porites_porites",
+      "name": "Porites_porites",
+      "description": null,
+      "fill": [
+        119,
+        0,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Pseudodiploria_clivosa",
+      "name": "Pseudodiploria_clivosa",
+      "description": null,
+      "fill": [
+        121,
+        173,
+        90
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Pseudodiploria_strigosa",
+      "name": "Pseudodiploria_strigosa",
+      "description": null,
+      "fill": [
+        119,
+        224,
+        58
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Scolymia_sp.",
+      "name": "Scolymia_sp.",
+      "description": null,
+      "fill": [
+        196,
+        73,
+        194
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Scolymia_cubensis",
+      "name": "Scolymia_cubensis",
+      "description": null,
+      "fill": [
+        212,
+        123,
+        210
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Scolymia_lacera",
+      "name": "Scolymia_lacera",
+      "description": null,
+      "fill": [
+        153,
+        67,
+        152
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Siderastrea_radians",
+      "name": "Siderastrea_radians",
+      "description": null,
+      "fill": [
+        187,
+        177,
+        242
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Siderastrea_siderea",
+      "name": "Siderastrea_siderea",
+      "description": null,
+      "fill": [
+        139,
+        121,
+        242
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Solenastrea_bournoni",
+      "name": "Solenastrea_bournoni",
+      "description": null,
+      "fill": [
+        0,
+        238,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Solenastrea_hyades",
+      "name": "Solenastrea_hyades",
+      "description": null,
+      "fill": [
+        0,
+        247,
+        255
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Stephanocoenia_intercepta",
+      "name": "Stephanocoenia_intercepta",
+      "description": null,
+      "fill": [
+        95,
+        93,
+        232
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    },
+    {
+      "id": "Stylaster_roseus",
+      "name": "Stylaster_roseus",
+      "description": null,
+      "fill": [
+        255,
+        140,
+        219
+      ],
+      "border": [
+        200,
+        200,
+        200
+      ],
+      "visible": true
+    }
+  ]
+}
