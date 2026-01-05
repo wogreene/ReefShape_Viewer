@@ -1,4 +1,4 @@
-//Will Greene 12/18/2025
+// Will Greene 12/18/2025
 // js/viewer-ol.js
 
 import Map from "https://esm.sh/ol@latest/Map.js";
@@ -10,6 +10,14 @@ import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/de
 import { defaults as defaultInteractions } from "https://esm.sh/ol@latest/interaction/defaults.js";
 import DragRotate from "https://esm.sh/ol@latest/interaction/DragRotate.js";
 import { platformModifierKeyOnly } from "https://esm.sh/ol@latest/events/condition.js";
+
+// NEW: GeoJSON overlay imports
+import VectorLayer from "https://esm.sh/ol@latest/layer/Vector.js";
+import VectorSource from "https://esm.sh/ol@latest/source/Vector.js";
+import GeoJSON from "https://esm.sh/ol@latest/format/GeoJSON.js";
+import Style from "https://esm.sh/ol@latest/style/Style.js";
+import Stroke from "https://esm.sh/ol@latest/style/Stroke.js";
+import Fill from "https://esm.sh/ol@latest/style/Fill.js";
 
 // --------------------------------------------------
 // Read reef ID
@@ -34,7 +42,7 @@ if (!feature) {
   throw new Error("Invalid reef id");
 }
 
-const { timepoints, bounds } = feature.properties;
+const { timepoints, bounds, overlays } = feature.properties;
 const years = Object.keys(timepoints);
 
 // --------------------------------------------------
@@ -84,12 +92,80 @@ const reefLayer = new WebGLTileLayer({
 });
 
 // --------------------------------------------------
+// NEW: Overlay layer (GeoJSON outlines)
+// --------------------------------------------------
+
+const overlayToggleWrap = document.getElementById("overlayToggleWrap");
+const overlayToggle = document.getElementById("overlayToggle");
+
+// clean outline style @ ~50% opacity
+const overlayStyle = new Style({
+  stroke: new Stroke({
+    color: "rgba(255,255,255,0.5)",
+    width: 2
+  }),
+  fill: new Fill({
+    color: "rgba(0,0,0,0)"
+  })
+});
+
+const overlayLayer = new VectorLayer({
+  visible: false,
+  source: null,
+  style: overlayStyle
+});
+
+const overlayCache = new Map();
+
+function overlayUrlFor(tp) {
+  if (!overlays) return null;
+  return overlays[tp] || null;
+}
+
+function getOverlaySource(url) {
+  if (!url) return null;
+  if (overlayCache.has(url)) return overlayCache.get(url);
+
+  const src = new VectorSource({
+    url,
+    format: new GeoJSON({
+      dataProjection: "EPSG:4326",
+      featureProjection: "EPSG:4326"
+    })
+  });
+
+  overlayCache.set(url, src);
+  return src;
+}
+
+function syncOverlayUI(tp) {
+  const url = overlayUrlFor(tp);
+
+  if (!url) {
+    if (overlayToggleWrap) overlayToggleWrap.style.display = "none";
+    if (overlayToggle) overlayToggle.checked = false;
+    overlayLayer.setVisible(false);
+    overlayLayer.setSource(null);
+    return;
+  }
+
+  if (overlayToggleWrap) overlayToggleWrap.style.display = "inline-flex";
+
+  if (overlayToggle && overlayToggle.checked) {
+    overlayLayer.setSource(getOverlaySource(url));
+    overlayLayer.setVisible(true);
+  } else {
+    overlayLayer.setVisible(false);
+  }
+}
+
+// --------------------------------------------------
 // Map (with correct interaction setup)
 // --------------------------------------------------
 
 const map = new Map({
   target: "map",
-  layers: [reefLayer],
+  layers: [reefLayer, overlayLayer], // overlay on top
   view,
   controls: defaultControls({
     zoom: false,
@@ -97,8 +173,8 @@ const map = new Map({
     attribution: false
   }),
   interactions: defaultInteractions({
-    altShiftDragRotate: false, // disable default alt rotation
-    pinchRotate: true,         // keep mobile rotation
+    altShiftDragRotate: false,
+    pinchRotate: true,
     onFocusOnly: true
   }),
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
@@ -143,9 +219,31 @@ years.forEach(y => {
   select.appendChild(opt);
 });
 
+// init overlay UI for first timepoint
+syncOverlayUI(years[0]);
+
 select.addEventListener("change", () => {
-  reefLayer.setSource(createGeoTIFFSource(timepoints[select.value]));
+  const tp = select.value;
+
+  reefLayer.setSource(createGeoTIFFSource(timepoints[tp]));
+  syncOverlayUI(tp);
 });
+
+// toggle overlay on/off
+if (overlayToggle) {
+  overlayToggle.addEventListener("change", () => {
+    const tp = select.value;
+    const url = overlayUrlFor(tp);
+
+    if (!overlayToggle.checked || !url) {
+      overlayLayer.setVisible(false);
+      return;
+    }
+
+    overlayLayer.setSource(getOverlaySource(url));
+    overlayLayer.setVisible(true);
+  });
+}
 
 // --------------------------------------------------
 // Custom zoom buttons
