@@ -1,7 +1,7 @@
 // Will Greene 12/18/2025
 // js/viewer-ol.js
 
-import Map from "https://esm.sh/ol@latest/Map.js";
+import OLMap from "https://esm.sh/ol@latest/Map.js";
 import View from "https://esm.sh/ol@latest/View.js";
 import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
 import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
@@ -18,6 +18,9 @@ import GeoJSON from "https://esm.sh/ol@latest/format/GeoJSON.js";
 import Style from "https://esm.sh/ol@latest/style/Style.js";
 import Stroke from "https://esm.sh/ol@latest/style/Stroke.js";
 import Fill from "https://esm.sh/ol@latest/style/Fill.js";
+
+// IMPORTANT: JS Map, not OpenLayers Map (since we renamed OLMap above)
+const JSMap = globalThis.Map;
 
 // --------------------------------------------------
 // Read reef ID
@@ -92,23 +95,22 @@ const reefLayer = new WebGLTileLayer({
 });
 
 // --------------------------------------------------
-// NEW: Overlay layer (GeoJSON outlines)
+// Overlay layer (GeoJSON outlines)
 // --------------------------------------------------
 
 const overlayToggleWrap = document.getElementById("overlayToggleWrap");
 const overlayToggle = document.getElementById("overlayToggle");
 
-// ---- NEW: load species->RGB mapping (from your PIMS palette JSON) ----
+// Load species->RGB mapping
 const coralPalette = await fetch("data/carribean_corals.json").then(r => r.json());
 
 // Build a lookup: "Acropora_palmata" -> [255,128,0]
-const coralColorById = new Map(
+const coralColorById = new JSMap(
   (coralPalette.Labels || []).map(l => [String(l.id), l.fill])
 );
 
-// Helper: feature -> species string (tries a few property names)
+// Helper: feature -> species string (tries common keys)
 function getSpeciesIdFromFeature(feat) {
-  // Adjust/extend these if your overlay GeoJSON uses different property keys
   const candidates = [
     "species",
     "Species",
@@ -132,14 +134,16 @@ function getSpeciesIdFromFeature(feat) {
 }
 
 // Cache styles so we don’t recreate per feature per frame
-const styleCache = new Map();
+const styleCache = new JSMap();
 
-// Clean colorized outline style with 50% opacity
+// Outline style by species color @ 50% opacity
 function overlayStyleFn(feat) {
   const speciesId = getSpeciesIdFromFeature(feat) || "Unidentified_coral";
-  const rgb = coralColorById.get(speciesId) || coralColorById.get("Unidentified_coral") || [255, 255, 255];
+  const rgb =
+    coralColorById.get(speciesId) ||
+    coralColorById.get("Unidentified_coral") ||
+    [255, 255, 255];
 
-  // 50% opacity outline
   const strokeRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.5)`;
 
   if (styleCache.has(strokeRGBA)) return styleCache.get(strokeRGBA);
@@ -149,7 +153,6 @@ function overlayStyleFn(feat) {
       color: strokeRGBA,
       width: 2
     }),
-    // keep fill fully transparent (outlines only)
     fill: new Fill({
       color: "rgba(0,0,0,0)"
     })
@@ -159,14 +162,14 @@ function overlayStyleFn(feat) {
   return style;
 }
 
-
 const overlayLayer = new VectorLayer({
   visible: false,
   source: null,
   style: overlayStyleFn
 });
 
-const overlayCache = new Map();
+// IMPORTANT: use JSMap for caching sources
+const overlayCache = new JSMap();
 
 function overlayUrlFor(tp) {
   if (!overlays) return null;
@@ -214,9 +217,9 @@ function syncOverlayUI(tp) {
 // Map (with correct interaction setup)
 // --------------------------------------------------
 
-const map = new Map({
+const map = new OLMap({
   target: "map",
-  layers: [reefLayer, overlayLayer], // overlay on top
+  layers: [reefLayer, overlayLayer],
   view,
   controls: defaultControls({
     zoom: false,
@@ -231,10 +234,7 @@ const map = new Map({
   pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
 });
 
-// --------------------------------------------------
-// Cmd (macOS) / Ctrl (Win/Linux) + drag rotation
-// --------------------------------------------------
-
+// Cmd/Ctrl + drag rotation
 map.addInteraction(
   new DragRotate({
     condition: platformModifierKeyOnly
@@ -244,10 +244,7 @@ map.addInteraction(
 // Black background for NoData areas
 map.getViewport().style.background = "black";
 
-// --------------------------------------------------
-// Scalebar (styled via CSS)
-// --------------------------------------------------
-
+// Scalebar
 map.addControl(
   new ScaleLine({
     units: "metric",
@@ -275,12 +272,11 @@ syncOverlayUI(years[0]);
 
 select.addEventListener("change", () => {
   const tp = select.value;
-
   reefLayer.setSource(createGeoTIFFSource(timepoints[tp]));
   syncOverlayUI(tp);
 });
 
-// toggle overlay on/off
+// Toggle overlay on/off
 if (overlayToggle) {
   overlayToggle.addEventListener("change", () => {
     const tp = select.value;
