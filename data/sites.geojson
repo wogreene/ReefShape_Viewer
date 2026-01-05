@@ -11,6 +11,8 @@
 
         "timepoints": {
           "20251103": "https://dl.dropboxusercontent.com/scl/fi/6o939vhxcpxtrw4qcg9xx/BullRun_20251103_cog.tif?rlkey=cz07p9uq4p4al5ww5wzdf4ick"
+        },
+        "overlays": {
         }
       },
       "geometry": {
@@ -30,6 +32,9 @@
           "20250325": "https://dl.dropboxusercontent.com/scl/fi/vuhghn20lwl2tr0pm3uwv/LoboHoras_24_20250325_cog.tif?rlkey=y8g3bs8pn49v8khxry2kyi6nm",
           "20250502": "https://dl.dropboxusercontent.com/scl/fi/7rlu4jszkyiwfccuvp7dc/LoboHoras_24_20250502_cog.tif?rlkey=1kr5rezbgyv9ri6w7yixivvq6",
           "20251103": "https://dl.dropboxusercontent.com/scl/fi/ci4uzx05ixluieubbvq61/LoboHoras_24_20251103_cog.tif?rlkey=3abef2ldey03586pgfwrofrr5"
+        },
+        "overlays": {
+          "20250325": "overlays/LoboHoras_20250325.geojson"
         }
       },
       "geometry": {
@@ -47,6 +52,8 @@
 
         "timepoints": {
           "20251103": "https://dl.dropboxusercontent.com/scl/fi/bodotytz16y3j2ojgojfd/VictoryReef_20251103_cog.tif?rlkey=dg0sz6yrc13rc72xs0ljgehz2"
+        },
+        "overlays": {
         }
       },
       "geometry": {
