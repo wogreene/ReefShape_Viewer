@@ -98,21 +98,72 @@ const reefLayer = new WebGLTileLayer({
 const overlayToggleWrap = document.getElementById("overlayToggleWrap");
 const overlayToggle = document.getElementById("overlayToggle");
 
-// clean outline style @ ~50% opacity
-const overlayStyle = new Style({
-  stroke: new Stroke({
-    color: "rgba(255,255,255,0.5)",
-    width: 2
-  }),
-  fill: new Fill({
-    color: "rgba(0,0,0,0)"
-  })
-});
+// ---- NEW: load species->RGB mapping (from your PIMS palette JSON) ----
+const coralPalette = await fetch("data/carribean_corals.json").then(r => r.json());
+
+// Build a lookup: "Acropora_palmata" -> [255,128,0]
+const coralColorById = new Map(
+  (coralPalette.Labels || []).map(l => [String(l.id), l.fill])
+);
+
+// Helper: feature -> species string (tries a few property names)
+function getSpeciesIdFromFeature(feat) {
+  // Adjust/extend these if your overlay GeoJSON uses different property keys
+  const candidates = [
+    "species",
+    "Species",
+    "label",
+    "Label",
+    "class",
+    "Class",
+    "id",
+    "Id",
+    "name",
+    "Name"
+  ];
+
+  for (const k of candidates) {
+    const v = feat.get(k);
+    if (v !== undefined && v !== null && String(v).trim() !== "") {
+      return String(v).trim();
+    }
+  }
+  return null;
+}
+
+// Cache styles so we don’t recreate per feature per frame
+const styleCache = new Map();
+
+// Clean colorized outline style with 50% opacity
+function overlayStyleFn(feat) {
+  const speciesId = getSpeciesIdFromFeature(feat) || "Unidentified_coral";
+  const rgb = coralColorById.get(speciesId) || coralColorById.get("Unidentified_coral") || [255, 255, 255];
+
+  // 50% opacity outline
+  const strokeRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.5)`;
+
+  if (styleCache.has(strokeRGBA)) return styleCache.get(strokeRGBA);
+
+  const style = new Style({
+    stroke: new Stroke({
+      color: strokeRGBA,
+      width: 2
+    }),
+    // keep fill fully transparent (outlines only)
+    fill: new Fill({
+      color: "rgba(0,0,0,0)"
+    })
+  });
+
+  styleCache.set(strokeRGBA, style);
+  return style;
+}
+
 
 const overlayLayer = new VectorLayer({
   visible: false,
   source: null,
-  style: overlayStyle
+  style: overlayStyleFn
 });
 
 const overlayCache = new Map();
