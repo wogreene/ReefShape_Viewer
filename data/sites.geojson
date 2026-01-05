@@ -34,7 +34,8 @@
           "20251103": "https://dl.dropboxusercontent.com/scl/fi/ci4uzx05ixluieubbvq61/LoboHoras_24_20251103_cog.tif?rlkey=3abef2ldey03586pgfwrofrr5"
         },
         "overlays": {
-          "20250325": "overlays/LoboHoras_20250325.geojson"
+          "20250325": "overlays/LoboHoras_20250325.geojson",
+          "20250502": "overlays/LoboHoras_20250502.geojson"
         }
       },
       "geometry": {
