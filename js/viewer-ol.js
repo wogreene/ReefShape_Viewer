@@ -1,4 +1,4 @@
-// Will Greene 01/05/2026
+// Will Greene 12/18/2025
 // js/viewer-ol.js
 
 import OLMap from "https://esm.sh/ol@latest/Map.js";
@@ -105,53 +105,28 @@ const reefLayer = new WebGLTileLayer({
 // Overlay palette (species -> RGB)
 // --------------------------------------------------
 
+const overlayToggleWrap = document.getElementById("overlayToggleWrap");
+const overlayToggle = document.getElementById("overlayToggle");
+
+// Palette JSON (id->RGB and id->name)
 const coralPalette = await fetch("data/carribean_corals.json").then(r => r.json());
-
-// id -> [r,g,b]
-const coralColorById = new JSMap(
-  (coralPalette.Labels || []).map(l => [String(l.id), l.fill])
-);
-
-// id -> human name
-const coralNameById = new JSMap(
-  (coralPalette.Labels || []).map(l => [String(l.id), l.name])
-);
+const coralColorById = new JSMap((coralPalette.Labels || []).map(l => [String(l.id), l.fill]));
+const coralNameById = new JSMap((coralPalette.Labels || []).map(l => [String(l.id), l.name]));
 
 function getSpeciesIdFromFeature(feat) {
-  // Your overlay file uses TL_Class, so prioritize it
-  const candidates = [
-    "TL_Class",
-    "species",
-    "Species",
-    "label",
-    "Label",
-    "class",
-    "Class",
-    "id",
-    "Id",
-    "name",
-    "Name"
-  ];
-
+  // Prioritize your schema
+  const candidates = ["TL_Class", "species", "label", "class", "id", "name", "Species", "Label", "Class", "Id", "Name"];
   for (const k of candidates) {
     const v = feat.get(k);
-    if (v !== undefined && v !== null && String(v).trim() !== "") {
-      return String(v).trim();
-    }
+    if (v !== undefined && v !== null && String(v).trim() !== "") return String(v).trim();
   }
   return null;
 }
 
-// --------------------------------------------------
-// Overlay layer (GeoJSON outlines + fill)
-// --------------------------------------------------
-
-const overlayToggleWrap = document.getElementById("overlayToggleWrap");
-const overlayToggle = document.getElementById("overlayToggle");
-
+// Style cache
 const styleCache = new JSMap();
 
-// Filled polygons using species color; black = nodata elsewhere (raster), so vector fill is fine
+// Filled polygons using species color
 function overlayStyleFn(feat) {
   const speciesId = getSpeciesIdFromFeature(feat) || "Unidentified_coral";
   const rgb =
@@ -159,7 +134,7 @@ function overlayStyleFn(feat) {
     coralColorById.get("Unidentified_coral") ||
     [255, 255, 255];
 
-  // Tune these if you want stronger/weaker overlay
+  // Fill ~35% opacity; stroke more visible
   const fillRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.35)`;
   const strokeRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.85)`;
 
@@ -248,11 +223,7 @@ const map = new OLMap({
 });
 
 // Cmd/Ctrl + drag rotation
-map.addInteraction(
-  new DragRotate({
-    condition: platformModifierKeyOnly
-  })
-);
+map.addInteraction(new DragRotate({ condition: platformModifierKeyOnly }));
 
 // Black background
 map.getViewport().style.background = "black";
@@ -272,7 +243,6 @@ map.addControl(
 // Popup for coral info (species + area)
 // --------------------------------------------------
 
-// Create popup DOM (no viewer.html edits needed)
 const popupEl = document.createElement("div");
 popupEl.style.position = "absolute";
 popupEl.style.background = "rgba(0,0,0,0.9)";
@@ -295,18 +265,16 @@ const popupOverlay = new Overlay({
 });
 map.addOverlay(popupOverlay);
 
-function formatAreaCm2(feat) {
-  // Prefer TL_Area if present (already looks like cm^2 in your data)
+function featureAreaCm2(feat) {
+  // Prefer TL_Area (fast)
   const a = feat.get("TL_Area");
   if (typeof a === "number" && isFinite(a)) return a;
 
-  // Fallback: geodesic area from geometry (m^2 -> cm^2)
+  // Fallback: geodesic geometry area (m^2 -> cm^2)
   const geom = feat.getGeometry();
-  if (!geom) return null;
-
+  if (!geom) return 0;
   const m2 = getGeodesicArea(geom, { projection: view.getProjection() });
-  const cm2 = m2 * 10000;
-  return cm2;
+  return m2 * 10000;
 }
 
 map.on("singleclick", (evt) => {
@@ -342,7 +310,7 @@ map.on("singleclick", (evt) => {
   const speciesId = getSpeciesIdFromFeature(found) || "Unidentified_coral";
   const speciesName = coralNameById.get(speciesId) || speciesId;
 
-  const areaCm2 = formatAreaCm2(found);
+  const areaCm2 = featureAreaCm2(found);
   const areaText =
     (typeof areaCm2 === "number" && isFinite(areaCm2))
       ? `${areaCm2.toFixed(2)} cm²`
@@ -357,11 +325,93 @@ map.on("singleclick", (evt) => {
   popupOverlay.setPosition(evt.coordinate);
 });
 
-// Hide popup on drag (keeps it from “sticking” while panning)
 map.on("movestart", () => {
   popupEl.style.display = "none";
   popupOverlay.setPosition(undefined);
 });
+
+// --------------------------------------------------
+// Coral cover estimate in current view (fast)
+// --------------------------------------------------
+
+const coverEl = document.createElement("div");
+coverEl.style.position = "absolute";
+coverEl.style.right = "12px";
+coverEl.style.bottom = "12px";
+coverEl.style.zIndex = "3500";
+coverEl.style.background = "rgba(0,0,0,0.85)";
+coverEl.style.border = "1px solid rgba(255,255,255,0.25)";
+coverEl.style.borderRadius = "6px";
+coverEl.style.padding = "8px 10px";
+coverEl.style.fontFamily = `"Courier New", Courier, monospace`;
+coverEl.style.fontSize = "13px";
+coverEl.style.color = "#fff";
+coverEl.style.minWidth = "170px";
+coverEl.style.pointerEvents = "none";
+coverEl.textContent = "Cover: —";
+map.getViewport().appendChild(coverEl);
+
+function extentAreaCm2From4326Extent(ext) {
+  const ring = [
+    [ext[0], ext[1]],
+    [ext[2], ext[1]],
+    [ext[2], ext[3]],
+    [ext[0], ext[3]],
+    [ext[0], ext[1]]
+  ];
+  const geom = new GeoJSON().readGeometry(
+    { type: "Polygon", coordinates: [ring] },
+    { dataProjection: "EPSG:4326", featureProjection: "EPSG:4326" }
+  );
+  const m2 = getGeodesicArea(geom, { projection: view.getProjection() });
+  return m2 * 10000;
+}
+
+function updateCoverageBox() {
+  // Only meaningful when overlay is visible and has a source
+  if (!overlayLayer.getVisible() || !overlayLayer.getSource()) {
+    coverEl.textContent = "Cover: —";
+    return;
+  }
+
+  const size = map.getSize();
+  if (!size) {
+    coverEl.textContent = "Cover: —";
+    return;
+  }
+
+  const ext = view.calculateExtent(size);
+  const viewAreaCm2 = extentAreaCm2From4326Extent(ext);
+
+  if (!isFinite(viewAreaCm2) || viewAreaCm2 <= 0) {
+    coverEl.textContent = "Cover: —";
+    return;
+  }
+
+  const src = overlayLayer.getSource();
+  const feats = src.getFeaturesInExtent(ext);
+
+  let coralAreaCm2 = 0;
+  for (const f of feats) coralAreaCm2 += featureAreaCm2(f);
+
+  let pct = (coralAreaCm2 / viewAreaCm2) * 100;
+  pct = Math.max(0, Math.min(100, pct)); // cap
+
+  coverEl.innerHTML =
+    `Cover: <b>${pct.toFixed(1)}%</b><br>` +
+    `Colonies: ${feats.length}`;
+}
+
+let coverTimer = null;
+function scheduleCoverageUpdate() {
+  if (coverTimer) clearTimeout(coverTimer);
+  coverTimer = setTimeout(() => {
+    coverTimer = null;
+    updateCoverageBox();
+  }, 150);
+}
+
+map.on("moveend", scheduleCoverageUpdate);
 
 // --------------------------------------------------
 // Timepoint selector
@@ -377,34 +427,40 @@ years.forEach(y => {
 
 // init overlay UI
 syncOverlayUI(years[0]);
+scheduleCoverageUpdate();
 
 select.addEventListener("change", () => {
   const tp = select.value;
+
   reefLayer.setSource(createGeoTIFFSource(timepoints[tp]));
   syncOverlayUI(tp);
 
-  // Close popup when changing timepoints
+  // close popup
   popupEl.style.display = "none";
   popupOverlay.setPosition(undefined);
+
+  scheduleCoverageUpdate();
 });
 
-// toggle overlay on/off
+// overlay toggle
 if (overlayToggle) {
   overlayToggle.addEventListener("change", () => {
     const tp = select.value;
     const url = overlayUrlFor(tp);
 
-    // Close popup whenever toggling
+    // close popup
     popupEl.style.display = "none";
     popupOverlay.setPosition(undefined);
 
     if (!overlayToggle.checked || !url) {
       overlayLayer.setVisible(false);
+      scheduleCoverageUpdate();
       return;
     }
 
     overlayLayer.setSource(getOverlaySource(url));
     overlayLayer.setVisible(true);
+    scheduleCoverageUpdate();
   });
 }
 
