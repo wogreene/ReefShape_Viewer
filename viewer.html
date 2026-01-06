@@ -25,6 +25,7 @@
     /* Viewer UI (overlay) */
     .viewer-ui {
       position: absolute;
+      flex-wrap: wrap;
       top: 12px;
       left: 12px;
       z-index: 3000;
@@ -39,6 +40,18 @@
 
       font-size: 14px;
       color: white;
+    }
+    
+    /*Delete this if wrap doesn't work properly on phone or if things break*/
+    @media (max-width: 768px) {
+      #overlayToggleWrap {
+        flex-basis: 100%;
+        margin-top: 6px;
+      }
+      #macWarningIcon {
+        order: 999;
+        margin-top: 6px;
+      }
     }
 
     .viewer-ui a.back-link {
