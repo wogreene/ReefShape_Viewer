@@ -346,12 +346,13 @@ coverEl.style.padding = "8px 10px";
 coverEl.style.fontFamily = `"Courier New", Courier, monospace`;
 coverEl.style.fontSize = "13px";
 coverEl.style.color = "#fff";
-coverEl.style.minWidth = "170px";
+coverEl.style.minWidth = "190px";
 coverEl.style.pointerEvents = "none";
-coverEl.textContent = "Cover: —";
+coverEl.textContent = "View Area: —\nCoral Cover: —\nColonies: —";
 map.getViewport().appendChild(coverEl);
 
-function extentAreaCm2From4326Extent(ext) {
+function extentAreaM2From4326Extent(ext) {
+  // ext = [minLon, minLat, maxLon, maxLat]
   const ring = [
     [ext[0], ext[1]],
     [ext[2], ext[1]],
@@ -363,28 +364,36 @@ function extentAreaCm2From4326Extent(ext) {
     { type: "Polygon", coordinates: [ring] },
     { dataProjection: "EPSG:4326", featureProjection: "EPSG:4326" }
   );
-  const m2 = getGeodesicArea(geom, { projection: view.getProjection() });
-  return m2 * 10000;
+  return getGeodesicArea(geom, { projection: view.getProjection() }); // m^2
 }
 
 function updateCoverageBox() {
   // Only meaningful when overlay is visible and has a source
   if (!overlayLayer.getVisible() || !overlayLayer.getSource()) {
-    coverEl.textContent = "Cover: —";
+    coverEl.innerHTML =
+      `View Area: —<br>` +
+      `Coral Cover: —<br>` +
+      `Colonies: —`;
     return;
   }
 
   const size = map.getSize();
   if (!size) {
-    coverEl.textContent = "Cover: —";
+    coverEl.innerHTML =
+      `View Area: —<br>` +
+      `Coral Cover: —<br>` +
+      `Colonies: —`;
     return;
   }
 
   const ext = view.calculateExtent(size);
-  const viewAreaCm2 = extentAreaCm2From4326Extent(ext);
+  const viewAreaM2 = extentAreaM2From4326Extent(ext);
 
-  if (!isFinite(viewAreaCm2) || viewAreaCm2 <= 0) {
-    coverEl.textContent = "Cover: —";
+  if (!isFinite(viewAreaM2) || viewAreaM2 <= 0) {
+    coverEl.innerHTML =
+      `View Area: —<br>` +
+      `Coral Cover: —<br>` +
+      `Colonies: —`;
     return;
   }
 
@@ -394,12 +403,14 @@ function updateCoverageBox() {
   let coralAreaCm2 = 0;
   for (const f of feats) coralAreaCm2 += featureAreaCm2(f);
 
-  let pct = (coralAreaCm2 / viewAreaCm2) * 100;
+  const coralAreaM2 = coralAreaCm2 / 10000;
+  let pct = (coralAreaM2 / viewAreaM2) * 100;
   pct = Math.max(0, Math.min(100, pct)); // cap
 
   coverEl.innerHTML =
-    `Cover: <b>${pct.toFixed(1)}%</b><br>` +
-    `Colonies: ${feats.length}`;
+    `View Area: <b>${viewAreaM2.toFixed(1)} m²</b><br>` +
+    `Coral Cover: <b>${pct.toFixed(1)}%</b><br>` +
+    `Colonies: <b>${feats.length}</b>`;
 }
 
 let coverTimer = null;
@@ -425,7 +436,7 @@ years.forEach(y => {
   select.appendChild(opt);
 });
 
-// init overlay UI
+// init overlay UI + coverage
 syncOverlayUI(years[0]);
 scheduleCoverageUpdate();
 
