@@ -42,15 +42,15 @@
       color: white;
     }
     
-    /*Delete this if wrap doesn't work properly on phone or if things break*/
+    /* Put overlay toggle + warning on their own row on mobile */
     @media (max-width: 768px) {
       #overlayToggleWrap {
         flex-basis: 100%;
         margin-top: 6px;
       }
+
       #macWarningIcon {
-        order: 999;
-        margin-top: 6px;
+        margin-left: auto; /* push icon to the right */
       }
     }
 
