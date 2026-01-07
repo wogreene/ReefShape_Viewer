@@ -42,24 +42,15 @@
       color: white;
     }
     
+    /* Put overlay toggle + warning on their own row on mobile */
     @media (max-width: 768px) {
-      /* allow wrapping */
-      .viewer-ui { 
-        flex-wrap: wrap;
-      }
-
-      /* make the overlay toggle take its own full row */
       #overlayToggleWrap {
-        flex: 1 1 auto;
-        width: 100%;
+        flex-basis: 100%;
         margin-top: 6px;
       }
 
-      /* keep the warning icon on THAT row, pinned to the right */
       #macWarningIcon {
-        margin-top: 6px;          /* align vertically with overlay row */
-        margin-left: auto;        /* push to far right */
-        flex: 0 0 auto;
+        margin-left: auto; /* push icon to the right */
       }
     }
 
