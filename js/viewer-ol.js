@@ -1,29 +1,29 @@
 // Will Greene 12/18/2025
 // js/viewer-ol.js
 
-import OLMap from "https://esm.sh/ol@latest/Map.js";
-import View from "https://esm.sh/ol@latest/View.js";
-import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
-import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
-import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
-import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
-import { defaults as defaultInteractions } from "https://esm.sh/ol@latest/interaction/defaults.js";
-import DragRotate from "https://esm.sh/ol@latest/interaction/DragRotate.js";
-import { platformModifierKeyOnly } from "https://esm.sh/ol@latest/events/condition.js";
+import OLMap from "https://esm.sh/ol@10.7.0/Map.js";
+import View from "https://esm.sh/ol@10.7.0/View.js";
+import WebGLTileLayer from "https://esm.sh/ol@10.7.0/layer/WebGLTile.js";
+import GeoTIFF from "https://esm.sh/ol@10.7.0/source/GeoTIFF.js";
+import ScaleLine from "https://esm.sh/ol@10.7.0/control/ScaleLine.js";
+import { defaults as defaultControls } from "https://esm.sh/ol@10.7.0/control/defaults.js";
+import { defaults as defaultInteractions } from "https://esm.sh/ol@10.7.0/interaction/defaults.js";
+import DragRotate from "https://esm.sh/ol@10.7.0/interaction/DragRotate.js";
+import { platformModifierKeyOnly } from "https://esm.sh/ol@10.7.0/events/condition.js";
 
 // Overlays (vector)
-import VectorLayer from "https://esm.sh/ol@latest/layer/Vector.js";
-import VectorSource from "https://esm.sh/ol@latest/source/Vector.js";
-import GeoJSON from "https://esm.sh/ol@latest/format/GeoJSON.js";
-import Style from "https://esm.sh/ol@latest/style/Style.js";
-import Stroke from "https://esm.sh/ol@latest/style/Stroke.js";
-import Fill from "https://esm.sh/ol@latest/style/Fill.js";
+import VectorLayer from "https://esm.sh/ol@10.7.0/layer/Vector.js";
+import VectorSource from "https://esm.sh/ol@10.7.0/source/Vector.js";
+import GeoJSON from "https://esm.sh/ol@10.7.0/format/GeoJSON.js";
+import Style from "https://esm.sh/ol@10.7.0/style/Style.js";
+import Stroke from "https://esm.sh/ol@10.7.0/style/Stroke.js";
+import Fill from "https://esm.sh/ol@10.7.0/style/Fill.js";
 
 // Popup
-import Overlay from "https://esm.sh/ol@latest/Overlay.js";
+import Overlay from "https://esm.sh/ol@10.7.0/Overlay.js";
 
 // Geodesic area fallback
-import { getArea as getGeodesicArea } from "https://esm.sh/ol@latest/sphere.js";
+import { getArea as getGeodesicArea } from "https://esm.sh/ol@10.7.0/sphere.js";
 
 // IMPORTANT: JS Map, not OpenLayers Map
 const JSMap = globalThis.Map;
