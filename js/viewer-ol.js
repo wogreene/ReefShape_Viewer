@@ -1,29 +1,26 @@
 // Will Greene 12/18/2025
 // js/viewer-ol.js
 
-import OLMap from "https://esm.sh/ol@10.7.0/Map.js";
-import View from "https://esm.sh/ol@10.7.0/View.js";
-import WebGLTileLayer from "https://esm.sh/ol@10.7.0/layer/WebGLTile.js";
-import GeoTIFF from "https://esm.sh/ol@10.7.0/source/GeoTIFF.js";
-import ScaleLine from "https://esm.sh/ol@10.7.0/control/ScaleLine.js";
-import { defaults as defaultControls } from "https://esm.sh/ol@10.7.0/control/defaults.js";
-import { defaults as defaultInteractions } from "https://esm.sh/ol@10.7.0/interaction/defaults.js";
-import DragRotate from "https://esm.sh/ol@10.7.0/interaction/DragRotate.js";
-import { platformModifierKeyOnly } from "https://esm.sh/ol@10.7.0/events/condition.js";
+import OLMap from "https://cdn.skypack.dev/ol@10.7.0/Map.js";
+import View from "https://cdn.skypack.dev/ol@10.7.0/View.js";
+import WebGLTileLayer from "https://cdn.skypack.dev/ol@10.7.0/layer/WebGLTile.js";
+import GeoTIFF from "https://cdn.skypack.dev/ol@10.7.0/source/GeoTIFF.js";
+import ScaleLine from "https://cdn.skypack.dev/ol@10.7.0/control/ScaleLine.js";
+import { defaults as defaultControls } from "https://cdn.skypack.dev/ol@10.7.0/control/defaults.js";
+import { defaults as defaultInteractions } from "https://cdn.skypack.dev/ol@10.7.0/interaction/defaults.js";
+import DragRotate from "https://cdn.skypack.dev/ol@10.7.0/interaction/DragRotate.js";
+import { platformModifierKeyOnly } from "https://cdn.skypack.dev/ol@10.7.0/events/condition.js";
 
 // Overlays (vector)
-import VectorLayer from "https://esm.sh/ol@10.7.0/layer/Vector.js";
-import VectorSource from "https://esm.sh/ol@10.7.0/source/Vector.js";
-import GeoJSON from "https://esm.sh/ol@10.7.0/format/GeoJSON.js";
-import Style from "https://esm.sh/ol@10.7.0/style/Style.js";
-import Stroke from "https://esm.sh/ol@10.7.0/style/Stroke.js";
-import Fill from "https://esm.sh/ol@10.7.0/style/Fill.js";
+import VectorLayer from "https://cdn.skypack.dev/ol@10.7.0/layer/Vector.js";
+import VectorSource from "https://cdn.skypack.dev/ol@10.7.0/source/Vector.js";
+import GeoJSON from "https://cdn.skypack.dev/ol@10.7.0/format/GeoJSON.js";
+import Style from "https://cdn.skypack.dev/ol@10.7.0/style/Style.js";
+import Stroke from "https://cdn.skypack.dev/ol@10.7.0/style/Stroke.js";
+import Fill from "https://cdn.skypack.dev/ol@10.7.0/style/Fill.js";
 
 // Popup
-import Overlay from "https://esm.sh/ol@10.7.0/Overlay.js";
-
-// Geodesic area fallback
-import { getArea as getGeodesicArea } from "https://esm.sh/ol@10.7.0/sphere.js";
+import Overlay from "https://cdn.skypack.dev/ol@10.7.0/Overlay.js";
 
 // IMPORTANT: JS Map, not OpenLayers Map
 const JSMap = globalThis.Map;
@@ -266,15 +263,36 @@ const popupOverlay = new Overlay({
 map.addOverlay(popupOverlay);
 
 function featureAreaCm2(feat) {
-  // Prefer TL_Area (fast)
+  // --------------------------------------------------
+  // 1) Prefer precomputed area if present (FAST + exact)
+  // --------------------------------------------------
   const a = feat.get("TL_Area");
-  if (typeof a === "number" && isFinite(a)) return a;
+  if (typeof a === "number" && isFinite(a)) {
+    return a; // already in cm²
+  }
 
-  // Fallback: geodesic geometry area (m^2 -> cm^2)
+  // --------------------------------------------------
+  // 2) Fast planar fallback (EPSG:4326)
+  //    Approximate polygon area using bounding box
+  //    Good enough for viewport estimates
+  // --------------------------------------------------
   const geom = feat.getGeometry();
   if (!geom) return 0;
-  const m2 = getGeodesicArea(geom, { projection: view.getProjection() });
-  return m2 * 10000;
+
+  const extent = geom.getExtent(); // [minX, minY, maxX, maxY] in degrees
+  const [minLon, minLat, maxLon, maxLat] = extent;
+
+  // Rough meters-per-degree conversion at mid-latitude
+  const midLat = (minLat + maxLat) / 2;
+  const metersPerDegLat = 111_320;
+  const metersPerDegLon = 111_320 * Math.cos(midLat * Math.PI / 180);
+
+  const widthM  = (maxLon - minLon) * metersPerDegLon;
+  const heightM = (maxLat - minLat) * metersPerDegLat;
+
+  const areaM2 = Math.abs(widthM * heightM);
+
+  return areaM2 * 10_000; // m² → cm²
 }
 
 map.on("singleclick", (evt) => {
@@ -351,8 +369,25 @@ coverEl.style.pointerEvents = "none";
 coverEl.textContent = "View Area: —\nCoral Cover: —\nColonies: —";
 map.getViewport().appendChild(coverEl);
 
+// Simple geodesic area (m^2) for EPSG:4326 extents/polygons using spherical Earth.
+// Good enough for "fast estimate" UI.
+function ringAreaM2LonLat(ring) {
+  const R = 6378137; // meters
+  let area = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    const [lon1, lat1] = ring[i];
+    const [lon2, lat2] = ring[i + 1];
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const λ1 = (lon1 * Math.PI) / 180;
+    const λ2 = (lon2 * Math.PI) / 180;
+    area += (λ2 - λ1) * (2 + Math.sin(φ1) + Math.sin(φ2));
+  }
+  area = (area * R * R) / 2;
+  return Math.abs(area);
+}
+
 function extentAreaM2From4326Extent(ext) {
-  // ext = [minLon, minLat, maxLon, maxLat]
   const ring = [
     [ext[0], ext[1]],
     [ext[2], ext[1]],
@@ -360,12 +395,9 @@ function extentAreaM2From4326Extent(ext) {
     [ext[0], ext[3]],
     [ext[0], ext[1]]
   ];
-  const geom = new GeoJSON().readGeometry(
-    { type: "Polygon", coordinates: [ring] },
-    { dataProjection: "EPSG:4326", featureProjection: "EPSG:4326" }
-  );
-  return getGeodesicArea(geom, { projection: view.getProjection() }); // m^2
+  return ringAreaM2LonLat(ring);
 }
+
 
 function updateCoverageBox() {
   // Only meaningful when overlay is visible and has a source
