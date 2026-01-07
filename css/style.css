@@ -286,4 +286,29 @@ button:active {
     padding: 6px 12px;
   }
 }
+/* --- OpenLayers scalebar: white text with black halo --- */
 
+.ol-scale-line-inner {
+  color: #ffffff !important;   /* white text */
+  font-family: "Courier New", Courier, monospace;
+  font-size: 13px;
+
+  background: none !important;
+  border: none !important;
+
+  /* black halo */
+  text-shadow:
+    -2px -2px 0 #000,
+     0px -2px 0 #000,
+     2px -2px 0 #000,
+    -2px  0px 0 #000,
+     2px  0px 0 #000,
+    -2px  2px 0 #000,
+     0px  2px 0 #000,
+     2px  2px 0 #000;
+}
+@media (max-width: 768px) {
+  .ol-scale-line-inner {
+    font-size: 16px;
+  }
+}
