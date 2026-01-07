@@ -288,7 +288,7 @@ button:active {
 }
 /* --- OpenLayers scalebar: white text with black halo --- */
 
-.ol-scale-line-inner {
+.ol-scale-line {
   color: #ffffff !important;   /* white text */
   font-family: "Courier New", Courier, monospace;
   font-size: 13px;
