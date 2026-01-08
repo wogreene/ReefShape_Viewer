@@ -332,6 +332,7 @@ map.on("movestart", () => {
 
 // --------------------------------------------------
 // Coral cover estimate in current view (fast)
+// + Area-weighted Shannon diversity (H')
 // --------------------------------------------------
 
 const coverEl = document.createElement("div");
@@ -346,9 +347,9 @@ coverEl.style.padding = "8px 10px";
 coverEl.style.fontFamily = `"Courier New", Courier, monospace`;
 coverEl.style.fontSize = "13px";
 coverEl.style.color = "#fff";
-coverEl.style.minWidth = "190px";
+coverEl.style.minWidth = "210px";
 coverEl.style.pointerEvents = "none";
-coverEl.textContent = "View Area: —\nCoral Cover: —\nColonies: —";
+coverEl.textContent = "View Area: —\nCoral Cover: —\nColonies: —\nShannon H′: —";
 map.getViewport().appendChild(coverEl);
 
 function extentAreaM2From4326Extent(ext) {
@@ -373,7 +374,8 @@ function updateCoverageBox() {
     coverEl.innerHTML =
       `View Area: —<br>` +
       `Coral Cover: —<br>` +
-      `Colonies: —`;
+      `Colonies: —<br>` +
+      `Shannon H′: —`;
     return;
   }
 
@@ -382,7 +384,8 @@ function updateCoverageBox() {
     coverEl.innerHTML =
       `View Area: —<br>` +
       `Coral Cover: —<br>` +
-      `Colonies: —`;
+      `Colonies: —<br>` +
+      `Shannon H′: —`;
     return;
   }
 
@@ -393,24 +396,44 @@ function updateCoverageBox() {
     coverEl.innerHTML =
       `View Area: —<br>` +
       `Coral Cover: —<br>` +
-      `Colonies: —`;
+      `Colonies: —<br>` +
+      `Shannon H′: —`;
     return;
   }
 
   const src = overlayLayer.getSource();
   const feats = src.getFeaturesInExtent(ext);
 
+  // Total coral area + per-species area (cm^2)
   let coralAreaCm2 = 0;
-  for (const f of feats) coralAreaCm2 += featureAreaCm2(f);
+  const areaBySpecies = new JSMap();
+
+  for (const f of feats) {
+    const a = featureAreaCm2(f);
+    coralAreaCm2 += a;
+
+    const sid = getSpeciesIdFromFeature(f) || "Unidentified_coral";
+    areaBySpecies.set(sid, (areaBySpecies.get(sid) || 0) + a);
+  }
 
   const coralAreaM2 = coralAreaCm2 / 10000;
   let pct = (coralAreaM2 / viewAreaM2) * 100;
   pct = Math.max(0, Math.min(100, pct)); // cap
 
+  // Area-weighted Shannon diversity: H' = -Σ p_i ln(p_i)
+  let shannon = 0;
+  if (coralAreaCm2 > 0) {
+    for (const a of areaBySpecies.values()) {
+      const p = a / coralAreaCm2;
+      if (p > 0) shannon += -p * Math.log(p); // natural log
+    }
+  }
+
   coverEl.innerHTML =
     `View Area: <b>${viewAreaM2.toFixed(1)} m²</b><br>` +
     `Coral Cover: <b>${pct.toFixed(1)}%</b><br>` +
-    `Colonies: <b>${feats.length}</b>`;
+    `Colonies: <b>${feats.length}</b><br>` +
+    `Shannon H′: <b>${shannon.toFixed(2)}</b>`;
 }
 
 let coverTimer = null;
