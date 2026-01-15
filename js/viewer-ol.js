@@ -274,86 +274,8 @@ map.addInteraction(new DragRotate({ condition: platformModifierKeyOnly }));
 // Black background
 map.getViewport().style.background = "black";
 
-// Scalebar (ScaleLine in bar mode)
-const scaleLine = new ScaleLine({
-  units: "metric",
-  bar: true,
-  steps: 4,
-  text: true,
-  minWidth: 120
-});
-
-const origRender = scaleLine.render.bind(scaleLine);
-
-scaleLine.render = function (mapEvent) {
-  const el = this.element;
-
-  // 1) Undo our previous modifications BEFORE OL renders again
-  if (el) {
-    el.querySelectorAll("[data-cm-converted='1']").forEach((node) => {
-      if (node.dataset.olText != null) node.textContent = node.dataset.olText;
-      if (node.dataset.olLeft != null) node.style.left = node.dataset.olLeft;
-      node.removeAttribute("data-cm-converted");
-    });
-  }
-
-  // 2) Let OpenLayers compute the bar + label positions normally
-  origRender(mapEvent);
-
-  const root = this.element;
-  if (!root) return;
-
-  // 3) Convert ONLY actual label-like nodes (ratio + tick labels)
-  //    - ratio: .ol-scale-text
-  //    - tick labels: typically absolutely-positioned text nodes inside the scale bar
-  const nodes = root.querySelectorAll(".ol-scale-text, .ol-scale-bar *");
-
-  nodes.forEach((node) => {
-    const raw = (node.textContent || "").trim();
-    if (!raw) return;
-
-    // Only touch labels that are exactly like "50 mm"
-    const mmMatch = raw.match(/^([\d.,]+)\s*mm$/i);
-    if (!mmMatch) return;
-
-    const cs = getComputedStyle(node);
-
-    // Skip bar graphics/markers (they don't contain "mm" anyway, but extra safety)
-    const cls = (node.className || "").toString();
-    if (cls.includes("ol-scale-singlebar") || cls.includes("ol-scale-step-marker")) return;
-
-    // Save OL's original values for the next render undo step
-    node.dataset.olText = raw;
-    if (node.style.left) node.dataset.olLeft = node.style.left;
-
-    // Measure before change (needed for tick label recenter)
-    const oldW = node.getBoundingClientRect().width;
-    const oldLeft = node.style.left; // OL-set inline left (best for non-compounding)
-
-    // Convert mm -> cm (1 decimal max, but drop trailing .0)
-    const mm = parseFloat(mmMatch[1].replace(",", "."));
-    if (!Number.isFinite(mm)) return;
-
-    const cmVal = Math.round((mm / 10) * 10) / 10;
-    const cmStr = Number.isInteger(cmVal) ? String(cmVal) : String(cmVal);
-    node.textContent = `${cmStr} cm`;
-
-    // Mark converted so we can undo next render
-    node.setAttribute("data-cm-converted", "1");
-
-    // 4) If OL positioned this label (absolute + left), re-center ONCE using OL's left
-    if (cs.position === "absolute" && oldLeft && oldLeft.endsWith("px")) {
-      const baseLeft = parseFloat(oldLeft);
-      if (Number.isFinite(baseLeft)) {
-        const newW = node.getBoundingClientRect().width;
-        const delta = (oldW - newW) / 2;
-        node.style.left = `${baseLeft + delta}px`;
-      }
-    }
-  });
-};
-
-map.addControl(scaleLine);
+// Scalebar 
+map.addControl(new ScaleLine({ units: "metric", bar: true, steps: 4, text: true, minWidth: 120 }) );
 
 
 
