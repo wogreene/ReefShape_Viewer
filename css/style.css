@@ -233,24 +233,39 @@ button:active {
   border-color: rgba(255,255,255,0.4);
 }
 
-/* --- Scalebar Formatting --- */
+/* --- OpenLayers scalebar: white text + clean black halo (no boxes) --- */
+.ol-scale-bar,
+.ol-scale-bar-inner {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* ---------Scalebar Formatting ----------*/
 .ol-scale-bar .ol-scale-text,
-.ol-scale-bar span,
-.ol-scale-bar [class*="text"],
-.ol-scale-bar [class*="label"] {
+.ol-scale-bar span {
   color: #fff !important;
   font-family: "Courier New", Courier, monospace;
   font-size: 13px;
   font-weight: 600;
 
-  background: rgba(0,0,0,0.45) !important;
+  background: transparent !important;
   border: none !important;
-  border-radius: 3px;
-  padding: 2px 6px;
-  line-height: 1.1;
+  padding: 0 !important;
+  border-radius: 0 !important;
 
-  text-shadow: none !important;
+  /* Clean halo: 1px outline + subtle reinforcement */
+  text-shadow:
+    -1px  0   0 rgba(0,0,0,0.95),
+     1px  0   0 rgba(0,0,0,0.95),
+     0   -1px  0 rgba(0,0,0,0.95),
+     0    1px  0 rgba(0,0,0,0.95),
+     0    0   2px rgba(0,0,0,0.65) !important;
+
+  /* Helps avoid “sparkly” rendering on some backgrounds */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
+
 
 /* ---------------- Viewer Overlay UI (for viewer.html) ---------------- */
 
