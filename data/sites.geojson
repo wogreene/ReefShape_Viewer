@@ -6,14 +6,14 @@
       "properties": {
         "id": "bullrun",
         "name": "Bull Run",
+        "password": "msc",
 
-        "bounds": [-79.24807271641542,25.4533289508983,-79.24773405382061,25.45364938850446],
+        "bounds": [-79.24807271641542, 25.4533289508983, -79.24773405382061, 25.45364938850446],
 
         "timepoints": {
           "20251103": "https://dl.dropboxusercontent.com/scl/fi/6o939vhxcpxtrw4qcg9xx/BullRun_20251103_cog.tif?rlkey=cz07p9uq4p4al5ww5wzdf4ick"
         },
-        "overlays": {
-        }
+        "overlays": {}
       },
       "geometry": {
         "type": "Point",
@@ -25,8 +25,9 @@
       "properties": {
         "id": "lobohoras",
         "name": "Lobo Horis",
+        "password": "msc",
 
-        "bounds": [-79.2255438980711801,25.4003844450776839,-79.2253517054830922,25.4005483573436841],
+        "bounds": [-79.2255438980711801, 25.4003844450776839, -79.2253517054830922, 25.4005483573436841],
 
         "timepoints": {
           "20250325": "https://dl.dropboxusercontent.com/scl/fi/vuhghn20lwl2tr0pm3uwv/LoboHoras_24_20250325_cog.tif?rlkey=y8g3bs8pn49v8khxry2kyi6nm",
@@ -36,7 +37,7 @@
         "overlays": {
           "20250325": "overlays/LoboHoras_20250325.geojson",
           "20250502": "overlays/LoboHoras_20250502.geojson",
-	  "20251103": "overlays/LoboHoras_20251103.geojson"
+          "20251103": "overlays/LoboHoras_20251103.geojson"
         }
       },
       "geometry": {
@@ -49,14 +50,14 @@
       "properties": {
         "id": "victoryreef",
         "name": "Victory Reef",
+        "password": "msc",
 
-        "bounds": [-79.27353423485278,25.484978144820523,-79.27324819807947,25.485270471302442],
+        "bounds": [-79.27353423485278, 25.484978144820523, -79.27324819807947, 25.485270471302442],
 
         "timepoints": {
           "20251103": "https://dl.dropboxusercontent.com/scl/fi/bodotytz16y3j2ojgojfd/VictoryReef_20251103_cog.tif?rlkey=dg0sz6yrc13rc72xs0ljgehz2"
         },
-        "overlays": {
-        }
+        "overlays": {}
       },
       "geometry": {
         "type": "Point",
