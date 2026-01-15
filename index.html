@@ -112,23 +112,22 @@
   <script src="js/map.js"></script>
 
   <script>
-    // Password gating (client-side soft gate)
-    const MASTER_PASSWORD = "PIMS";
-
-    // For now, only one project password exists
-    const PROJECT_PASSWORDS = new Set(["msc"]);
+  (function () {
+    // ---- Splash password handling (no globals) ----
 
     function normalizePw(pw) {
-      // Case-sensitive by default. If you want case-insensitive, use:
-      // return (pw || "").trim().toLowerCase();
       return (pw || "").trim();
     }
 
     function isValidPassword(pw) {
       const p = normalizePw(pw);
       if (!p) return false;
-      if (p === MASTER_PASSWORD) return true;
-      return PROJECT_PASSWORDS.has(p);
+
+      // Master password
+      if (p === "PIMS") return true;
+
+      // Current project passwords
+      return p === "msc";
     }
 
     function submitPassword() {
@@ -141,29 +140,27 @@
         return;
       }
 
-      // Store for map.js + viewer pages
       sessionStorage.setItem("reefshape_password", pw);
-
-      // Close splash screen and reveal map
       document.getElementById("intro-modal").style.display = "none";
       err.textContent = "";
     }
 
-    // Click "Enter" button
-    document.getElementById("enter-button").addEventListener("click", submitPassword);
+    // Button click
+    document.getElementById("enter-button")
+      .addEventListener("click", submitPassword);
 
-    // Press Enter in the input
-    document.getElementById("access-password").addEventListener("keydown", (e) => {
-      if (e.key === "Enter") submitPassword();
-    });
+    // Press Enter in input
+    document.getElementById("access-password")
+      .addEventListener("keydown", (e) => {
+        if (e.key === "Enter") submitPassword();
+      });
 
-    // Optional: If password already set this session, auto-enter
-    (function autoEnterIfPasswordSet() {
-      const pw = normalizePw(sessionStorage.getItem("reefshape_password"));
-      if (isValidPassword(pw)) {
-        document.getElementById("intro-modal").style.display = "none";
-      }
-    })();
+    // Auto-enter if password already exists
+    const existing = normalizePw(sessionStorage.getItem("reefshape_password"));
+    if (isValidPassword(existing)) {
+      document.getElementById("intro-modal").style.display = "none";
+    }
+  })();
   </script>
 </body>
 </html>
