@@ -79,7 +79,7 @@
     .viewer-ui button:hover { background: #222; }
     .viewer-ui button:active { background: #444; }
 
-    /* NEW: Overlay toggle (hidden unless overlays exist for this reef+timepoint) */
+    /* Overlay toggle (hidden unless overlays exist for this reef+timepoint) */
     .overlay-toggle {
       display: none; /* shown by viewer-ol.js only when available */
       align-items: center;
@@ -145,6 +145,16 @@
       color: black;
     }
   </style>
+
+  <script>
+    // Gate: if user didn't come through splash / has no session password, bounce back
+    (function enforcePasswordGate() {
+      const pw = (sessionStorage.getItem("reefshape_password") || "").trim();
+      if (!pw) {
+        window.location.replace("./index.html");
+      }
+    })();
+  </script>
 </head>
 
 <body>
@@ -162,7 +172,7 @@
     <label for="timepointSelect">Time:</label>
     <select id="timepointSelect"></select>
 
-    <!-- NEW: overlay toggle placeholder (viewer-ol.js will show/hide + wire it up) -->
+    <!-- overlay toggle placeholder (viewer-ol.js will show/hide + wire it up) -->
     <label class="overlay-toggle" id="overlayToggleWrap">
       <input type="checkbox" id="overlayToggle">
       Overlays
