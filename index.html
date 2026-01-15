@@ -57,6 +57,15 @@
       color: #ffd2d2;
       min-height: 1.2em;
     }
+
+    /* Change Project button (top-right) */
+    #change-project-btn{
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 4500;
+      display: none; /* shown after valid entry (or auto-enter) */
+    }
   </style>
 </head>
 
@@ -109,11 +118,17 @@
 
   <div id="map"></div>
 
+  <!-- Change Project button (shown after entry) -->
+  <button id="change-project-btn">Change project</button>
+
   <script src="js/map.js"></script>
 
   <script>
   (function () {
     // ---- Splash password handling (no globals) ----
+
+    const introModal = document.getElementById("intro-modal");
+    const changeBtn = document.getElementById("change-project-btn");
 
     function normalizePw(pw) {
       return (pw || "").trim();
@@ -130,6 +145,10 @@
       return p === "msc";
     }
 
+    function showChangeProjectButton() {
+      if (changeBtn) changeBtn.style.display = "inline-block";
+    }
+
     function submitPassword() {
       const input = document.getElementById("access-password");
       const err = document.getElementById("access-error");
@@ -141,8 +160,9 @@
       }
 
       sessionStorage.setItem("reefshape_password", pw);
-      document.getElementById("intro-modal").style.display = "none";
+      if (introModal) introModal.style.display = "none";
       err.textContent = "";
+      showChangeProjectButton();
     }
 
     // Button click
@@ -155,10 +175,19 @@
         if (e.key === "Enter") submitPassword();
       });
 
+    // Change project: clear password and reload
+    if (changeBtn) {
+      changeBtn.addEventListener("click", () => {
+        sessionStorage.removeItem("reefshape_password");
+        window.location.reload();
+      });
+    }
+
     // Auto-enter if password already exists
     const existing = normalizePw(sessionStorage.getItem("reefshape_password"));
     if (isValidPassword(existing)) {
-      document.getElementById("intro-modal").style.display = "none";
+      if (introModal) introModal.style.display = "none";
+      showChangeProjectButton();
     }
   })();
   </script>
