@@ -26,11 +26,12 @@
     /* Viewer UI (overlay) */
     .viewer-ui {
       position: absolute;
-      flex-wrap: wrap;
       top: 12px;
       left: 12px;
       z-index: 3000;
+
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       gap: 8px;
 
@@ -41,18 +42,10 @@
 
       font-size: 14px;
       color: white;
-    }
-    
-    /* Put overlay toggle + warning on their own row on mobile */
-    @media (max-width: 768px) {
-      #overlayToggleWrap {
-        flex-basis: 100%;
-        margin-top: 6px;
-      }
 
-      #macWarningIcon {
-        margin-left: auto; /* push icon to the right */
-      }
+      /* helps prevent weird wrapping on narrow screens */
+      max-width: calc(100vw - 24px);
+      box-sizing: border-box;
     }
 
     .viewer-ui a.back-link {
@@ -84,9 +77,6 @@
       display: none; /* shown by viewer-ol.js only when available */
       align-items: center;
       gap: 6px;
-      margin-left: 10px;
-      padding-left: 10px;
-      border-left: 1px solid rgba(255,255,255,0.25);
       user-select: none;
       white-space: nowrap;
     }
@@ -98,11 +88,42 @@
 
     /* Mac Warning Icon inside UI */
     #macWarningIcon {
-      margin-left: 6px;
       font-size: 22px;
       cursor: pointer;
       color: #ffcc00;
       display: none; /* shown by JS */
+      line-height: 1;
+    }
+
+    /* NEW: row wrapper for overlays + warning (keeps them together) */
+    #overlayRow {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Mobile layout fixes:
+       - Force overlayRow to become the second line (100% width)
+       - Keep Overlays + Warning on the same line
+       - Make the timepoint select shrink to reduce wrapping
+    */
+    @media (max-width: 768px) {
+      /* second line */
+      #overlayRow {
+        flex-basis: 100%;
+        width: 100%;
+        margin-top: 6px;
+      }
+
+      /* keep warning at right edge of that second line */
+      #macWarningIcon {
+        margin-left: auto;
+      }
+
+      /* reduce select width so first row doesn't explode into extra wrap lines */
+      #timepointSelect {
+        max-width: 160px;
+      }
     }
 
     /* Warning Modal */
@@ -144,6 +165,17 @@
       background: #ffcc00;
       color: black;
     }
+
+    /* NEW: prevent bottom overlap on mobile by moving stats box up a bit.
+       viewer-ol.js will set id="coverBox" (see next file update).
+    */
+    @media (max-width: 768px) {
+      #coverBox {
+        bottom: 86px !important; /* lift above scalebar */
+        right: 12px !important;
+        min-width: 190px !important;
+      }
+    }
   </style>
 
   <script>
@@ -172,14 +204,15 @@
     <label for="timepointSelect">Time:</label>
     <select id="timepointSelect"></select>
 
-    <!-- overlay toggle placeholder (viewer-ol.js will show/hide + wire it up) -->
-    <label class="overlay-toggle" id="overlayToggleWrap">
-      <input type="checkbox" id="overlayToggle">
-      Overlays
-    </label>
+    <!-- NEW: second-row wrapper so Overlays + Warning stay together -->
+    <div id="overlayRow">
+      <label class="overlay-toggle" id="overlayToggleWrap">
+        <input type="checkbox" id="overlayToggle">
+        Overlays
+      </label>
 
-    <!-- mac warning icon -->
-    <span id="macWarningIcon">⚠️</span>
+      <span id="macWarningIcon">⚠️</span>
+    </div>
   </div>
 
   <!-- Warning Modal -->
