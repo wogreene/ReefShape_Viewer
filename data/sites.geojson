@@ -71,7 +71,7 @@
         "name": "Sandy Cay Reef",
         "password": "drone",
 
-        "bounds": [-76.9970609239, 26.392526832, -76.987977786, 26.4035201939],
+        "bounds": [-76.99093376, 26.3947475649, -76.9879637739, 26.403501208],
 
         "timepoints": {
           "20210803": "https://dl.dropboxusercontent.com/scl/fi/ms4uyz97231p2128l2q3k/SandyCayTest.tif?rlkey=923k0g69gy8ck48q791lbix2l&st=ztmm5did"
