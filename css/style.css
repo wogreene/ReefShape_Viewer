@@ -233,17 +233,15 @@ button:active {
   border-color: rgba(255,255,255,0.4);
 }
 
-/* --- OpenLayers scalebar: white text with black halo --- */
-
-.ol-scale-line-inner {
-  color: #ffffff !important;   /* white text */
+/* --- OpenLayers scalebar text: white w/ black halo --- */
+.ol-scale-bar .ol-scale-text {
+  color: #fff !important;
   font-family: "Courier New", Courier, monospace;
   font-size: 13px;
 
-  background: none !important;
+  background: transparent !important;
   border: none !important;
 
-  /* black halo */
   text-shadow:
     -2px -2px 0 #000,
      0px -2px 0 #000,
@@ -254,6 +252,13 @@ button:active {
      0px  2px 0 #000,
      2px  2px 0 #000;
 }
+
+/* Optional: make the scalebar background transparent too */
+.ol-scale-bar {
+  background: transparent !important;
+  border: none !important;
+}
+
 
 /* ---------------- Viewer Overlay UI (for viewer.html) ---------------- */
 
