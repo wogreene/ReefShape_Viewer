@@ -283,52 +283,78 @@ const scaleLine = new ScaleLine({
   minWidth: 120
 });
 
-// Convert mm -> cm and re-center tick labels whose position was computed from old text width
 const origRender = scaleLine.render.bind(scaleLine);
 
 scaleLine.render = function (mapEvent) {
+  const el = this.element;
+
+  // 1) Undo our previous modifications BEFORE OL renders again
+  if (el) {
+    el.querySelectorAll("[data-cm-converted='1']").forEach((node) => {
+      if (node.dataset.olText != null) node.textContent = node.dataset.olText;
+      if (node.dataset.olLeft != null) node.style.left = node.dataset.olLeft;
+      node.removeAttribute("data-cm-converted");
+    });
+  }
+
+  // 2) Let OpenLayers compute the bar + label positions normally
   origRender(mapEvent);
 
-  const el = this.element;
-  if (!el) return;
+  const root = this.element;
+  if (!root) return;
 
-  // Grab *text-containing* elements in the scalebar (ratio + tick labels)
-  const candidates = el.querySelectorAll(
-    ".ol-scale-text, .ol-scale-bar span, .ol-scale-bar div"
-  );
+  // 3) Convert ONLY actual label-like nodes (ratio + tick labels)
+  //    - ratio: .ol-scale-text
+  //    - tick labels: typically absolutely-positioned text nodes inside the scale bar
+  const nodes = root.querySelectorAll(".ol-scale-text, .ol-scale-bar *");
 
-  candidates.forEach((node) => {
-    const txt = (node.textContent || "").trim();
+  nodes.forEach((node) => {
+    const raw = (node.textContent || "").trim();
+    if (!raw) return;
 
-    const mmMatch = txt.match(/^([\d.,]+)\s*mm$/i);
+    // Only touch labels that are exactly like "50 mm"
+    const mmMatch = raw.match(/^([\d.,]+)\s*mm$/i);
     if (!mmMatch) return;
 
-    // Measure BEFORE change (for recentering)
-    const oldW = node.getBoundingClientRect().width;
+    const cs = getComputedStyle(node);
 
+    // Skip bar graphics/markers (they don't contain "mm" anyway, but extra safety)
+    const cls = (node.className || "").toString();
+    if (cls.includes("ol-scale-singlebar") || cls.includes("ol-scale-step-marker")) return;
+
+    // Save OL's original values for the next render undo step
+    node.dataset.olText = raw;
+    if (node.style.left) node.dataset.olLeft = node.style.left;
+
+    // Measure before change (needed for tick label recenter)
+    const oldW = node.getBoundingClientRect().width;
+    const oldLeft = node.style.left; // OL-set inline left (best for non-compounding)
+
+    // Convert mm -> cm (1 decimal max, but drop trailing .0)
     const mm = parseFloat(mmMatch[1].replace(",", "."));
     if (!Number.isFinite(mm)) return;
 
-    const cm = Math.round((mm / 10) * 10) / 10; // 1 decimal max
-    node.textContent = `${cm} cm`;
+    const cmVal = Math.round((mm / 10) * 10) / 10;
+    const cmStr = Number.isInteger(cmVal) ? String(cmVal) : String(cmVal);
+    node.textContent = `${cmStr} cm`;
 
-    // If OL positioned this label using left/top (absolute), re-center based on new width
-    const cs = getComputedStyle(node);
-    const isAbs = cs.position === "absolute";
-    const leftPx = parseFloat(cs.left);
+    // Mark converted so we can undo next render
+    node.setAttribute("data-cm-converted", "1");
 
-    if (isAbs && Number.isFinite(leftPx)) {
-      // Measure AFTER change
-      const newW = node.getBoundingClientRect().width;
-      const delta = (oldW - newW) / 2;
-
-      // Nudge left by half the width difference so the label stays centered
-      node.style.left = `${leftPx + delta}px`;
+    // 4) If OL positioned this label (absolute + left), re-center ONCE using OL's left
+    if (cs.position === "absolute" && oldLeft && oldLeft.endsWith("px")) {
+      const baseLeft = parseFloat(oldLeft);
+      if (Number.isFinite(baseLeft)) {
+        const newW = node.getBoundingClientRect().width;
+        const delta = (oldW - newW) / 2;
+        node.style.left = `${baseLeft + delta}px`;
+      }
     }
   });
 };
 
 map.addControl(scaleLine);
+
 
 
 // --------------------------------------------------
