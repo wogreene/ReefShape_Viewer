@@ -47,7 +47,7 @@ function computeBBoxLonLat(features) {
 
 // A safe default view BEFORE we know what sites are accessible.
 // Once sites load, we will always fit to the accessible sites.
-const DEFAULT_VIEW = { center: [-79.21, 25.42], zoom: 10 };
+const DEFAULT_VIEW = { center: [-74, 18], zoom: 6 };
 
 // ---------------------------
 // Map style
