@@ -17,45 +17,45 @@
 
   <!-- Minimal styles for password entry (kept here so you don't have to touch style.css yet) -->
   <style>
+    /* Password entry area */
     #access-panel{
       margin-top: 18px;
       display: flex;
+      flex-direction: column; /* button goes below input */
       gap: 10px;
       align-items: center;
       justify-content: center;
-      flex-wrap: wrap;
     }
+
+    /* Dark gray input, white text, centered, Courier, visible characters */
     #access-password{
-      width: 260px;
+      width: 320px;
+      max-width: 85vw;
       padding: 10px 12px;
       border-radius: 10px;
-      border: 1px solid rgba(0,0,0,0.15);
-      background: rgba(255,255,255,0.9);
-      color: #111;
+      border: 1px solid rgba(255,255,255,0.25);
+      background: rgba(35,35,35,0.95);
+      color: #fff;
       outline: none;
+
+      text-align: center;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 14px;
+      letter-spacing: 0.3px;
     }
-    #access-submit{
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid rgba(0,0,0,0.15);
-      background: rgba(0,0,0,0.08);
-      color: #111;
-      cursor: pointer;
+
+    #access-password::placeholder{
+      color: rgba(255,255,255,0.65);
+      text-align: center;
+      font-family: "Courier New", Courier, monospace;
     }
+
     #access-error{
       width: 100%;
       text-align: center;
       font-size: 0.95rem;
-      color: #b00020;
+      color: #ffd2d2;
       min-height: 1.2em;
-      margin-top: 4px;
-    }
-    #access-hint{
-      width: 100%;
-      text-align: center;
-      font-size: 0.85rem;
-      opacity: 0.85;
-      margin-top: 2px;
     }
   </style>
 </head>
@@ -87,16 +87,23 @@
         Global Discovery and Conservation Science
       </p>
 
-      <!-- NEW: password entry panel -->
+      <!-- Password entry -->
       <div id="access-panel">
-        <input id="access-password" type="password" placeholder="Enter project password…" autocomplete="current-password" />
-        <button id="access-submit">Enter</button>
-        <div id="access-error" aria-live="polite"></div>
-        <div id="access-hint">Project: <code>msc</code> · Master: <code>PIMS</code></div>
-      </div>
+        <!-- NOTE: type="text" so it shows what you type (not dots) -->
+        <input
+          id="access-password"
+          type="text"
+          placeholder="Enter project password"
+          autocomplete="off"
+          autocapitalize="none"
+          spellcheck="false"
+        />
 
-      <!-- OLD button removed by design (password is now the entry) -->
-      <!-- <button id="enter-button">Enter</button> -->
+        <!-- Use your original button styling/ID -->
+        <button id="enter-button">Enter</button>
+
+        <div id="access-error" aria-live="polite"></div>
+      </div>
     </div>
   </div>
 
@@ -108,8 +115,7 @@
     // Password gating (client-side soft gate)
     const MASTER_PASSWORD = "PIMS";
 
-    // For now, only one project password is enabled.
-    // We'll expand this later when you add more projects.
+    // For now, only one project password exists
     const PROJECT_PASSWORDS = new Set(["msc"]);
 
     function normalizePw(pw) {
@@ -135,7 +141,7 @@
         return;
       }
 
-      // Store for viewer logic (map.js will read this and filter sites)
+      // Store for map.js + viewer pages
       sessionStorage.setItem("reefshape_password", pw);
 
       // Close splash screen and reveal map
@@ -143,12 +149,15 @@
       err.textContent = "";
     }
 
-    document.getElementById("access-submit").addEventListener("click", submitPassword);
+    // Click "Enter" button
+    document.getElementById("enter-button").addEventListener("click", submitPassword);
+
+    // Press Enter in the input
     document.getElementById("access-password").addEventListener("keydown", (e) => {
       if (e.key === "Enter") submitPassword();
     });
 
-    // Optional: If user already entered a valid password this session, auto-enter
+    // Optional: If password already set this session, auto-enter
     (function autoEnterIfPasswordSet() {
       const pw = normalizePw(sessionStorage.getItem("reefshape_password"));
       if (isValidPassword(pw)) {
