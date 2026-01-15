@@ -376,6 +376,7 @@ map.on("movestart", () => {
 // --------------------------------------------------
 
 const coverEl = document.createElement("div");
+coverEl.id = "coverBox";
 coverEl.style.position = "absolute";
 coverEl.style.right = "12px";
 coverEl.style.bottom = "12px";
