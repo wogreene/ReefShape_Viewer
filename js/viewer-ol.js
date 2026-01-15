@@ -274,16 +274,47 @@ map.addInteraction(new DragRotate({ condition: platformModifierKeyOnly }));
 // Black background
 map.getViewport().style.background = "black";
 
-// Scalebar
-map.addControl(
-  new ScaleLine({
-    units: "metric",
-    bar: true,
-    steps: 4,
-    text: true,
-    minWidth: 120
-  })
-);
+// Scalebar (ScaleLine in bar mode)
+const scaleLine = new ScaleLine({
+  units: "metric",
+  bar: true,
+  steps: 4,
+  text: true,
+  minWidth: 120
+});
+
+// Convert mm -> cm in the rendered labels (ratio + tick labels)
+const origRender = scaleLine.render.bind(scaleLine);
+scaleLine.render = function (mapEvent) {
+  origRender(mapEvent);
+
+  const el = this.element;
+  if (!el) return;
+
+  // Targets the ratio and any tick labels that OL renders as text
+  const textNodes = el.querySelectorAll(".ol-scale-text, .ol-scale-bar span, .ol-scale-bar div");
+
+  textNodes.forEach((node) => {
+    const txt = (node.textContent || "").trim();
+
+    // Replace e.g. "25 mm" -> "2.5 cm"
+    const mmMatch = txt.match(/^([\d.,]+)\s*mm$/i);
+    if (!mmMatch) return;
+
+    const mm = parseFloat(mmMatch[1].replace(",", "."));
+    if (!Number.isFinite(mm)) return;
+
+    const cm = mm / 10;
+
+    // Formatting: show one decimal only when needed (e.g., 2.5 cm), otherwise integer (e.g., 3 cm)
+    const rounded1 = Math.round(cm * 10) / 10;
+    const formatted = Number.isInteger(rounded1) ? String(rounded1) : String(rounded1);
+
+    node.textContent = `${formatted} cm`;
+  });
+};
+
+map.addControl(scaleLine);
 
 // --------------------------------------------------
 // Popup for coral info (species + area)
