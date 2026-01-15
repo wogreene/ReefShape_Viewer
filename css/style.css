@@ -233,16 +233,15 @@ button:active {
   border-color: rgba(255,255,255,0.4);
 }
 
-/* --- OpenLayers scalebar: white text + clean black halo (no boxes) --- */
+/* --- OpenLayers scalebar: white text + clean black halo (ratio + tick labels) --- */
 .ol-scale-bar,
 .ol-scale-bar-inner {
   background: transparent !important;
   border: none !important;
 }
 
-/* ---------Scalebar Formatting ----------*/
-.ol-scale-bar .ol-scale-text,
-.ol-scale-bar span {
+/* Ratio text */
+.ol-scale-bar .ol-scale-text {
   color: #fff !important;
   font-family: "Courier New", Courier, monospace;
   font-size: 13px;
@@ -251,9 +250,7 @@ button:active {
   background: transparent !important;
   border: none !important;
   padding: 0 !important;
-  border-radius: 0 !important;
 
-  /* Clean halo: 1px outline + subtle reinforcement */
   text-shadow:
     -1px  0   0 rgba(0,0,0,0.95),
      1px  0   0 rgba(0,0,0,0.95),
@@ -261,7 +258,38 @@ button:active {
      0    1px  0 rgba(0,0,0,0.95),
      0    0   2px rgba(0,0,0,0.65) !important;
 
-  /* Helps avoid “sparkly” rendering on some backgrounds */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
+}
+
+/* Tick labels: catch the common OL class names AND generic div/span label nodes,
+   while excluding the actual bar graphics + marker ticks. */
+.ol-scale-bar .ol-scale-step-text,
+.ol-scale-bar .ol-scale-step-text *,
+.ol-scale-bar [class*="step-text"],
+.ol-scale-bar [class*="scale-text"],
+.ol-scale-bar span,
+.ol-scale-bar div:not(.ol-scale-bar-inner)
+               :not(.ol-scale-singlebar)
+               :not(.ol-scale-singlebar-odd)
+               :not(.ol-scale-singlebar-even)
+               :not(.ol-scale-step-marker) {
+  color: #fff !important;
+  font-family: "Courier New", Courier, monospace;
+  font-size: 13px;
+  font-weight: 600;
+
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+
+  text-shadow:
+    -1px  0   0 rgba(0,0,0,0.95),
+     1px  0   0 rgba(0,0,0,0.95),
+     0   -1px  0 rgba(0,0,0,0.95),
+     0    1px  0 rgba(0,0,0,0.95),
+     0    0   2px rgba(0,0,0,0.65) !important;
+
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
 }
