@@ -283,38 +283,53 @@ const scaleLine = new ScaleLine({
   minWidth: 120
 });
 
-// Convert mm -> cm in the rendered labels (ratio + tick labels)
+// Convert mm -> cm and re-center tick labels whose position was computed from old text width
 const origRender = scaleLine.render.bind(scaleLine);
+
 scaleLine.render = function (mapEvent) {
   origRender(mapEvent);
 
   const el = this.element;
   if (!el) return;
 
-  // Targets the ratio and any tick labels that OL renders as text
-  const textNodes = el.querySelectorAll(".ol-scale-text, .ol-scale-bar span, .ol-scale-bar div");
+  // Grab *text-containing* elements in the scalebar (ratio + tick labels)
+  const candidates = el.querySelectorAll(
+    ".ol-scale-text, .ol-scale-bar span, .ol-scale-bar div"
+  );
 
-  textNodes.forEach((node) => {
+  candidates.forEach((node) => {
     const txt = (node.textContent || "").trim();
 
-    // Replace e.g. "25 mm" -> "2.5 cm"
     const mmMatch = txt.match(/^([\d.,]+)\s*mm$/i);
     if (!mmMatch) return;
+
+    // Measure BEFORE change (for recentering)
+    const oldW = node.getBoundingClientRect().width;
 
     const mm = parseFloat(mmMatch[1].replace(",", "."));
     if (!Number.isFinite(mm)) return;
 
-    const cm = mm / 10;
+    const cm = Math.round((mm / 10) * 10) / 10; // 1 decimal max
+    node.textContent = `${cm} cm`;
 
-    // Formatting: show one decimal only when needed (e.g., 2.5 cm), otherwise integer (e.g., 3 cm)
-    const rounded1 = Math.round(cm * 10) / 10;
-    const formatted = Number.isInteger(rounded1) ? String(rounded1) : String(rounded1);
+    // If OL positioned this label using left/top (absolute), re-center based on new width
+    const cs = getComputedStyle(node);
+    const isAbs = cs.position === "absolute";
+    const leftPx = parseFloat(cs.left);
 
-    node.textContent = `${formatted} cm`;
+    if (isAbs && Number.isFinite(leftPx)) {
+      // Measure AFTER change
+      const newW = node.getBoundingClientRect().width;
+      const delta = (oldW - newW) / 2;
+
+      // Nudge left by half the width difference so the label stays centered
+      node.style.left = `${leftPx + delta}px`;
+    }
   });
 };
 
 map.addControl(scaleLine);
+
 
 // --------------------------------------------------
 // Popup for coral info (species + area)
