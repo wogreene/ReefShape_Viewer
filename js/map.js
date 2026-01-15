@@ -5,11 +5,6 @@
 // ---------------------------
 const MASTER_PASSWORD = "PIMS";
 
-// Project view presets (set these how you want)
-const PROJECT_VIEWS = {
-  msc: { center: [-79.21, 25.42], zoom: 10 } // you can adjust later
-};
-
 function normalizePw(pw) {
   // Case-sensitive by default. If you want case-insensitive, use:
   // return (pw || "").trim().toLowerCase();
@@ -35,6 +30,7 @@ function computeBBoxLonLat(features) {
     if (!geom || geom.type !== "Point") continue;
     const c = geom.coordinates;
     if (!Array.isArray(c) || c.length < 2) continue;
+
     const lon = Number(c[0]);
     const lat = Number(c[1]);
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
@@ -49,14 +45,9 @@ function computeBBoxLonLat(features) {
   return [[minLon, minLat], [maxLon, maxLat]];
 }
 
-function getInitialCenterZoom() {
-  const pw = getPassword();
-  if (pw && pw !== MASTER_PASSWORD && PROJECT_VIEWS[pw]) {
-    return PROJECT_VIEWS[pw];
-  }
-  // Default (what you had before)
-  return { center: [-79.21, 25.42], zoom: 10 };
-}
+// A safe default view BEFORE we know what sites are accessible.
+// Once sites load, we will always fit to the accessible sites.
+const DEFAULT_VIEW = { center: [-79.21, 25.42], zoom: 10 };
 
 // ---------------------------
 // Map style
@@ -104,12 +95,10 @@ const STYLE = {
   ]
 };
 
-const initialView = getInitialCenterZoom();
-
 const map = new maplibregl.Map({
   container: "map",
-  center: initialView.center,
-  zoom: initialView.zoom,
+  center: DEFAULT_VIEW.center,
+  zoom: DEFAULT_VIEW.zoom,
   minZoom: 0,
   maxZoom: 26,
   style: STYLE
@@ -183,17 +172,13 @@ async function loadAndAddSites() {
     });
   }
 
-  // Apply initial view logic:
-  // - If project preset exists (msc), we already centered/zoomed before map init.
-  // - Otherwise (including master PIMS), fit to accessible sites.
-  if (pw === MASTER_PASSWORD || !PROJECT_VIEWS[pw]) {
-    const bbox = computeBBoxLonLat(filteredSites.features);
-    if (bbox) {
-      map.fitBounds(bbox, {
-        padding: 80,
-        maxZoom: 16
-      });
-    }
+  // NEW behavior: always auto-zoom to whatever sites are accessible for the password
+  const bbox = computeBBoxLonLat(filteredSites.features);
+  if (bbox) {
+    map.fitBounds(bbox, {
+      padding: 80,
+      maxZoom: 16
+    });
   }
 
   // If they entered a valid password but no sites matched, warn in console
