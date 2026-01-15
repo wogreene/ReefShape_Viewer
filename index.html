@@ -15,19 +15,19 @@
 
   <link rel="stylesheet" href="css/style.css" />
 
-  <!-- Minimal styles for password entry (kept here so you don't have to touch style.css yet) -->
+  <!-- Password + splash styles -->
   <style>
     /* Password entry area */
     #access-panel{
       margin-top: 18px;
       display: flex;
-      flex-direction: column; /* button goes below input */
+      flex-direction: column;
       gap: 10px;
       align-items: center;
       justify-content: center;
     }
 
-    /* Dark gray input, white text, centered, Courier, visible characters */
+    /* Desktop default (kept at 14px) */
     #access-password{
       width: 320px;
       max-width: 85vw;
@@ -48,6 +48,17 @@
       color: rgba(255,255,255,0.65);
       text-align: center;
       font-family: "Courier New", Courier, monospace;
+      font-size: 14px;
+    }
+
+    /* 🔑 Mobile fix: prevent iOS zoom-on-focus */
+    @media (max-width: 768px){
+      #access-password{
+        font-size: 16px;
+      }
+      #access-password::placeholder{
+        font-size: 16px;
+      }
     }
 
     #access-error{
@@ -58,13 +69,13 @@
       min-height: 1.2em;
     }
 
-    /* Change Project button (top-right) */
+    /* Change Project button — fixed so keyboard doesn't break layout */
     #change-project-btn{
-      position: absolute;
+      position: fixed;
       top: 12px;
       right: 12px;
       z-index: 4500;
-      display: none; /* shown after valid entry (or auto-enter) */
+      display: none;
     }
   </style>
 </head>
@@ -96,9 +107,7 @@
         Global Discovery and Conservation Science
       </p>
 
-      <!-- Password entry -->
       <div id="access-panel">
-        <!-- NOTE: type="text" so it shows what you type (not dots) -->
         <input
           id="access-password"
           type="text"
@@ -108,7 +117,6 @@
           spellcheck="false"
         />
 
-        <!-- Use your original button styling/ID -->
         <button id="enter-button">Enter</button>
 
         <div id="access-error" aria-live="polite"></div>
@@ -118,15 +126,12 @@
 
   <div id="map"></div>
 
-  <!-- Change Project button (shown after entry) -->
   <button id="change-project-btn">Change project</button>
 
   <script src="js/map.js"></script>
 
   <script>
   (function () {
-    // ---- Splash password handling (no globals) ----
-
     const introModal = document.getElementById("intro-modal");
     const changeBtn = document.getElementById("change-project-btn");
 
@@ -137,11 +142,7 @@
     function isValidPassword(pw) {
       const p = normalizePw(pw);
       if (!p) return false;
-
-      // Master password
       if (p === "PIMS") return true;
-
-      // Current project passwords
       return p === "msc";
     }
 
@@ -165,17 +166,14 @@
       showChangeProjectButton();
     }
 
-    // Button click
     document.getElementById("enter-button")
       .addEventListener("click", submitPassword);
 
-    // Press Enter in input
     document.getElementById("access-password")
       .addEventListener("keydown", (e) => {
         if (e.key === "Enter") submitPassword();
       });
 
-    // Change project: clear password and reload
     if (changeBtn) {
       changeBtn.addEventListener("click", () => {
         sessionStorage.removeItem("reefshape_password");
@@ -183,7 +181,6 @@
       });
     }
 
-    // Auto-enter if password already exists
     const existing = normalizePw(sessionStorage.getItem("reefshape_password"));
     if (isValidPassword(existing)) {
       if (introModal) introModal.style.display = "none";
