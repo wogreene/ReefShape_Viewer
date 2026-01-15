@@ -29,6 +29,33 @@ import { getArea as getGeodesicArea } from "https://esm.sh/ol@latest/sphere.js";
 const JSMap = globalThis.Map;
 
 // --------------------------------------------------
+// Password gate helpers (client-side soft gate)
+// --------------------------------------------------
+
+const MASTER_PASSWORD = "PIMS";
+
+function normalizePw(pw) {
+  // Case-sensitive by default. If you want case-insensitive passwords, use:
+  // return (pw || "").trim().toLowerCase();
+  return (pw || "").trim();
+}
+
+function getSessionPassword() {
+  return normalizePw(sessionStorage.getItem("reefshape_password"));
+}
+
+function featureAllowsAccess(featureProps, pw) {
+  if (!pw) return false;
+  if (pw === MASTER_PASSWORD) return true;
+  return normalizePw(featureProps?.password) === pw;
+}
+
+function bounceToIndex(message) {
+  if (message) alert(message);
+  window.location.replace("./index.html");
+}
+
+// --------------------------------------------------
 // Read reef ID
 // --------------------------------------------------
 
@@ -39,20 +66,39 @@ if (!reefId) {
   throw new Error("Missing reef id");
 }
 
+// Require a password in session (prevents direct linking without entering)
+const sessionPw = getSessionPassword();
+if (!sessionPw) {
+  bounceToIndex("Please enter a project password to access this viewer.");
+  throw new Error("Missing session password");
+}
+
 // --------------------------------------------------
-// Load metadata
+// Load metadata (and enforce access)
 // --------------------------------------------------
 
-const sites = await fetch("data/sites.geojson").then(r => r.json());
-const feature = sites.features.find(f => f.properties.id === reefId);
+const sites = await fetch("data/sites.geojson", { cache: "no-store" }).then(r => r.json());
+const feature = (sites.features || []).find(f => f?.properties?.id === reefId);
 
 if (!feature) {
   alert("Reef not found");
   throw new Error("Invalid reef id");
 }
 
+// Enforce access: master sees all; otherwise must match feature.properties.password
+if (!featureAllowsAccess(feature.properties, sessionPw)) {
+  bounceToIndex("Access denied for this site with the current password.");
+  throw new Error("Access denied");
+}
+
 const { timepoints, bounds, overlays } = feature.properties;
-const years = Object.keys(timepoints);
+const years = Object.keys(timepoints || {});
+
+// Safety: must have at least one timepoint
+if (!years.length) {
+  alert("No timepoints found for this reef.");
+  throw new Error("Missing timepoints");
+}
 
 // --------------------------------------------------
 // View
