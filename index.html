@@ -14,7 +14,52 @@
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 
   <link rel="stylesheet" href="css/style.css" />
+
+  <!-- Minimal styles for password entry (kept here so you don't have to touch style.css yet) -->
+  <style>
+    #access-panel{
+      margin-top: 18px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    #access-password{
+      width: 260px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,0.15);
+      background: rgba(255,255,255,0.9);
+      color: #111;
+      outline: none;
+    }
+    #access-submit{
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,0.15);
+      background: rgba(0,0,0,0.08);
+      color: #111;
+      cursor: pointer;
+    }
+    #access-error{
+      width: 100%;
+      text-align: center;
+      font-size: 0.95rem;
+      color: #b00020;
+      min-height: 1.2em;
+      margin-top: 4px;
+    }
+    #access-hint{
+      width: 100%;
+      text-align: center;
+      font-size: 0.85rem;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+  </style>
 </head>
+
 <div id="view-choice-modal" style="display:none;">
   <div id="view-choice-content">
     <h2 id="view-choice-title">Victory Reef</h2>
@@ -27,29 +72,89 @@
     <button id="view-cancel">Cancel</button>
   </div>
 </div>
+
 <body>
   <div id="intro-modal">
-  <div id="intro-content">
-    <h1 id="intro-title">ReefShape Viewer</h1>
-    <p id="intro-description">
-      This is a web-based viewer for georeferenced, underwater
-      photomosaics collected and processed using the 
-      <a href="https://github.com/Perry-Institute/ReefShape/">ReefShape</a> methodology.
-      Each dot on the map represents a plot - click on one to zoom in and 
-      display imagery in 2D, or, if available, 3D using gaussian splats. Use the dropdown to select the timepoint. 
-      Created by Will Greene at the Perry Institute for Marine Science / Arizona State University Center for 
-      Global Discovery and Conservation Science
-    </p>
-    <button id="enter-button">Enter</button>
+    <div id="intro-content">
+      <h1 id="intro-title">ReefShape Viewer</h1>
+      <p id="intro-description">
+        This is a web-based viewer for georeferenced, underwater
+        photomosaics collected and processed using the
+        <a href="https://github.com/Perry-Institute/ReefShape/">ReefShape</a> methodology.
+        Each dot on the map represents a plot - click on one to zoom in and
+        display imagery in 2D, or, if available, 3D using gaussian splats. Use the dropdown to select the timepoint.
+        Created by Will Greene at the Perry Institute for Marine Science / Arizona State University Center for
+        Global Discovery and Conservation Science
+      </p>
+
+      <!-- NEW: password entry panel -->
+      <div id="access-panel">
+        <input id="access-password" type="password" placeholder="Enter project password…" autocomplete="current-password" />
+        <button id="access-submit">Enter</button>
+        <div id="access-error" aria-live="polite"></div>
+        <div id="access-hint">Project: <code>msc</code> · Master: <code>PIMS</code></div>
+      </div>
+
+      <!-- OLD button removed by design (password is now the entry) -->
+      <!-- <button id="enter-button">Enter</button> -->
+    </div>
   </div>
-</div>
+
   <div id="map"></div>
 
   <script src="js/map.js"></script>
+
   <script>
-  document.getElementById("enter-button").addEventListener("click", () => {
-    document.getElementById("intro-modal").style.display = "none";
-  });
-</script>
+    // Password gating (client-side soft gate)
+    const MASTER_PASSWORD = "PIMS";
+
+    // For now, only one project password is enabled.
+    // We'll expand this later when you add more projects.
+    const PROJECT_PASSWORDS = new Set(["msc"]);
+
+    function normalizePw(pw) {
+      // Case-sensitive by default. If you want case-insensitive, use:
+      // return (pw || "").trim().toLowerCase();
+      return (pw || "").trim();
+    }
+
+    function isValidPassword(pw) {
+      const p = normalizePw(pw);
+      if (!p) return false;
+      if (p === MASTER_PASSWORD) return true;
+      return PROJECT_PASSWORDS.has(p);
+    }
+
+    function submitPassword() {
+      const input = document.getElementById("access-password");
+      const err = document.getElementById("access-error");
+      const pw = normalizePw(input.value);
+
+      if (!isValidPassword(pw)) {
+        err.textContent = "Invalid password.";
+        return;
+      }
+
+      // Store for viewer logic (map.js will read this and filter sites)
+      sessionStorage.setItem("reefshape_password", pw);
+
+      // Close splash screen and reveal map
+      document.getElementById("intro-modal").style.display = "none";
+      err.textContent = "";
+    }
+
+    document.getElementById("access-submit").addEventListener("click", submitPassword);
+    document.getElementById("access-password").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submitPassword();
+    });
+
+    // Optional: If user already entered a valid password this session, auto-enter
+    (function autoEnterIfPasswordSet() {
+      const pw = normalizePw(sessionStorage.getItem("reefshape_password"));
+      if (isValidPassword(pw)) {
+        document.getElementById("intro-modal").style.display = "none";
+      }
+    })();
+  </script>
 </body>
 </html>
