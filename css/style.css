@@ -262,8 +262,7 @@ button:active {
   text-rendering: geometricPrecision;
 }
 
-/* Tick labels: catch the common OL class names AND generic div/span label nodes,
-   while excluding the actual bar graphics + marker ticks. */
+/* Tick labels */
 .ol-scale-bar .ol-scale-step-text,
 .ol-scale-bar .ol-scale-step-text *,
 .ol-scale-bar [class*="step-text"],
@@ -293,7 +292,6 @@ button:active {
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
 }
-
 
 /* ---------------- Viewer Overlay UI (for viewer.html) ---------------- */
 
@@ -334,74 +332,78 @@ button:active {
   background: #444;
 }
 
-/* Circular help button */
-.help-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 9999;
+/* ---------------- Help button + modal (index.html) ---------------- */
 
+/* Help button matches Change project (same height + styling, centered ?) */
+#help-btn{
+  height: 36px;               /* match Change project height */
   width: 36px;
-  height: 36px;
   border-radius: 999px;
 
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-family: inherit;
+  font-size: 14px;            /* match default button font-size */
+  font-weight: normal;        /* not bold */
+  line-height: 1;
+
   color: #fff;
-  font-weight: 700;
-  font-size: 18px;
-  line-height: 36px;
-  text-align: center;
+  background: #000;           /* match button background */
+  border: 1px solid rgba(255,255,255,0.4);  /* match button border */
 
   cursor: pointer;
-  user-select: none;
+  padding: 0;
   -webkit-tap-highlight-color: transparent;
 }
 
-.help-btn:hover {
-  background: rgba(0, 0, 0, 0.8);
+#help-btn:hover{
+  background: #222;           /* match hover behavior */
 }
 
-/* Modal container */
-.help-modal {
+#help-btn:active{
+  background: #444;           /* match active behavior */
+}
+
+/* Help modal */
+#help-modal{
   position: fixed;
   inset: 0;
   z-index: 10000;
-
-  display: none; /* toggled via .is-open */
+  display: none;
 }
 
-.help-modal.is-open {
+#help-modal.is-open{
   display: block;
 }
 
 /* Darken map */
-.help-modal__backdrop {
+#help-modal .help-backdrop{
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.65);
+  background: rgba(0,0,0,0.65);
 }
 
 /* Popup panel */
-.help-modal__panel {
+#help-modal .help-panel{
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
 
-  width: min(900px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  width: min(900px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
 
   background: rgba(15, 15, 15, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255,255,255,0.12);
   border-radius: 14px;
-  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
-
+  box-shadow: 0 18px 60px rgba(0,0,0,0.55);
   overflow: hidden;
 }
 
 /* Close button (top-left) */
-.help-modal__close {
+#help-modal .help-close{
   position: absolute;
   top: 10px;
   left: 10px;
@@ -411,29 +413,29 @@ button:active {
   height: 34px;
   border-radius: 10px;
 
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.55);
   color: #fff;
   font-size: 18px;
   line-height: 32px;
   cursor: pointer;
 }
 
-.help-modal__content {
-  padding: 52px 14px 14px; /* leaves room for close button */
+#help-modal .help-content{
+  padding: 52px 14px 14px;
 }
 
 /* Responsive 16:9 video */
-.help-modal__video {
+#help-modal .help-video{
   position: relative;
   width: 100%;
-  padding-top: 56.25%; /* 16:9 */
+  padding-top: 56.25%;
   background: #000;
   border-radius: 12px;
   overflow: hidden;
 }
 
-.help-modal__video iframe {
+#help-modal .help-video iframe{
   position: absolute;
   inset: 0;
   width: 100%;
@@ -441,8 +443,7 @@ button:active {
   border: 0;
 }
 
-/* Bigger on mobile */
-
+/* Viewer UI mobile bump */
 @media (max-width: 768px) {
   .viewer-ui {
     font-size: 16px;
