@@ -208,6 +208,39 @@ map.on("load", async () => {
   }
 });
 
+<script>
+  (function () {
+    const btn = document.getElementById("helpBtn");
+    const modal = document.getElementById("helpModal");
+    const backdrop = modal.querySelector(".help-modal__backdrop");
+    const closeBtn = modal.querySelector(".help-modal__close");
+
+    function openModal() {
+      modal.classList.add("is-open");
+      modal.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden"; // prevent background scroll on mobile
+    }
+
+    function closeModal() {
+      modal.classList.remove("is-open");
+      modal.setAttribute("aria-hidden", "true");
+      document.body.style.overflow = "";
+    }
+
+    btn.addEventListener("click", openModal);
+    closeBtn.addEventListener("click", closeModal);
+
+    // Click outside panel closes
+    backdrop.addEventListener("click", closeModal);
+
+    // ESC closes
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && modal.classList.contains("is-open")) closeModal();
+    });
+  })();
+</script>
+
+
 // ---------------------------
 // Click → viewer
 // ---------------------------
