@@ -13,9 +13,10 @@
   />
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
 
+  <!-- Main stylesheet -->
   <link rel="stylesheet" href="css/style.css" />
 
-  <!-- Password + splash styles + Help modal styles -->
+  <!-- Inline styles: ONLY password + layout-critical rules -->
   <style>
     /* Password entry area */
     #access-panel{
@@ -27,7 +28,6 @@
       justify-content: center;
     }
 
-    /* Desktop default (kept at 14px) */
     #access-password{
       width: 320px;
       max-width: 85vw;
@@ -51,11 +51,9 @@
       font-size: 14px;
     }
 
-    /* 🔑 Mobile fix: prevent iOS zoom-on-focus */
+    /* Prevent iOS zoom-on-focus */
     @media (max-width: 768px){
-      #access-password{
-        font-size: 16px;
-      }
+      #access-password,
       #access-password::placeholder{
         font-size: 16px;
       }
@@ -69,131 +67,26 @@
       min-height: 1.2em;
     }
 
-    /* ===== Top-right button bar (Help + Change project) ===== */
+    /* Top-right controls container */
     #top-right-controls{
       position: fixed;
       top: 12px;
       right: 12px;
       z-index: 4500;
-      display: none;            /* shown after password */
+      display: none; /* shown after password */
       align-items: center;
       gap: 8px;
     }
 
-    /* Change Project button — keep your existing id */
+    /* Allow flex layout */
     #change-project-btn{
-      position: static;         /* IMPORTANT: allow flex layout */
+      position: static;
       display: inline-block;
-    }
-
-    /* Help circular button */
-    #help-btn{
-      width: 36px;
-      height: 36px;
-      border-radius: 999px;
-
-      border: 1px solid rgba(255,255,255,0.35);
-      background: rgba(35,35,35,0.85);
-      color: #fff;
-      font-weight: 700;
-      font-size: 18px;
-      line-height: 34px;
-      text-align: center;
-
-      cursor: pointer;
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-    }
-    #help-btn:hover{
-      background: rgba(35,35,35,0.95);
-    }
-
-    /* Slightly smaller on very small screens to preserve one-line layout */
-    @media (max-width: 420px){
-      #help-btn{
-        width: 34px;
-        height: 34px;
-        font-size: 17px;
-        line-height: 32px;
-      }
-    }
-
-    /* ===== Help Video Modal ===== */
-    #help-modal{
-      position: fixed;
-      inset: 0;
-      z-index: 10000;
-      display: none; /* toggled via .is-open */
-    }
-    #help-modal.is-open{
-      display: block;
-    }
-
-    #help-modal .help-backdrop{
-      position: absolute;
-      inset: 0;
-      background: rgba(0,0,0,0.65);
-    }
-
-    #help-modal .help-panel{
-      position: absolute;
-      left: 50%;
-      top: 50%;
-      transform: translate(-50%, -50%);
-
-      width: min(900px, calc(100vw - 28px));
-      max-height: calc(100vh - 28px);
-
-      background: rgba(15, 15, 15, 0.98);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 14px;
-      box-shadow: 0 18px 60px rgba(0,0,0,0.55);
-      overflow: hidden;
-    }
-
-    /* Close button (top-left) */
-    #help-modal .help-close{
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 2;
-
-      width: 34px;
-      height: 34px;
-      border-radius: 10px;
-
-      border: 1px solid rgba(255,255,255,0.18);
-      background: rgba(0,0,0,0.55);
-      color: #fff;
-      font-size: 18px;
-      line-height: 32px;
-      cursor: pointer;
-    }
-
-    #help-modal .help-content{
-      padding: 52px 14px 14px; /* leaves room for close button */
-    }
-
-    /* Responsive 16:9 video wrapper */
-    #help-modal .help-video{
-      position: relative;
-      width: 100%;
-      padding-top: 56.25%; /* 16:9 */
-      background: #000;
-      border-radius: 12px;
-      overflow: hidden;
-    }
-
-    #help-modal .help-video iframe{
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      border: 0;
     }
   </style>
 </head>
 
+<!-- View choice modal -->
 <div id="view-choice-modal" style="display:none;">
   <div id="view-choice-content">
     <h2 id="view-choice-title">Victory Reef</h2>
@@ -208,6 +101,7 @@
 </div>
 
 <body>
+  <!-- Intro / password modal -->
   <div id="intro-modal">
     <div id="intro-content">
       <h1 id="intro-title">ReefShape Viewer</h1>
@@ -216,9 +110,7 @@
         photomosaics collected and processed using the
         <a href="https://github.com/Perry-Institute/ReefShape/">ReefShape</a> methodology.
         Each dot on the map represents a plot - click on one to zoom in and
-        display imagery in 2D, or, if available, 3D using gaussian splats. Use the dropdown to select the timepoint.
-        Created by Will Greene at the Perry Institute for Marine Science / Arizona State University Center for
-        Global Discovery and Conservation Science
+        display imagery in 2D, or, if available, 3D using gaussian splats.
       </p>
 
       <div id="access-panel">
@@ -232,15 +124,15 @@
         />
 
         <button id="enter-button">Enter</button>
-
         <div id="access-error" aria-live="polite"></div>
       </div>
     </div>
   </div>
 
+  <!-- Map -->
   <div id="map"></div>
 
-  <!-- Top-right controls: Help + Change project -->
+  <!-- Top-right controls -->
   <div id="top-right-controls">
     <button id="help-btn" type="button" aria-label="Open help video" title="Help">?</button>
     <button id="change-project-btn" type="button">Change project</button>
@@ -248,14 +140,13 @@
 
   <!-- Help video modal -->
   <div id="help-modal" aria-hidden="true" role="dialog" aria-label="Instructional video">
-    <div class="help-backdrop" data-close="true"></div>
+    <div class="help-backdrop"></div>
 
     <div class="help-panel" role="document">
-      <button class="help-close" type="button" aria-label="Close help video" title="Close">✕</button>
+      <button class="help-close" type="button" aria-label="Close help video">✕</button>
 
       <div class="help-content">
         <div class="help-video">
-          <!-- Your iframe (responsive, no autoplay) -->
           <iframe
             src="https://www.youtube.com/embed/gx9IjP_d7vU"
             title="ReefShape instructional video"
@@ -269,103 +160,87 @@
     </div>
   </div>
 
+  <!-- Map logic -->
   <script src="js/map.js"></script>
 
+  <!-- Page logic -->
   <script>
-  (function () {
-    const introModal = document.getElementById("intro-modal");
-    const controls = document.getElementById("top-right-controls");
-    const changeBtn = document.getElementById("change-project-btn");
+    (function () {
+      const introModal = document.getElementById("intro-modal");
+      const controls = document.getElementById("top-right-controls");
+      const changeBtn = document.getElementById("change-project-btn");
 
-    // Help modal elements
-    const helpBtn = document.getElementById("help-btn");
-    const helpModal = document.getElementById("help-modal");
-    const helpBackdrop = helpModal ? helpModal.querySelector(".help-backdrop") : null;
-    const helpClose = helpModal ? helpModal.querySelector(".help-close") : null;
-    const helpIframe = helpModal ? helpModal.querySelector("iframe") : null;
-    const helpSrc = helpIframe ? helpIframe.getAttribute("src") : null; // used to stop video on close
+      const helpBtn = document.getElementById("help-btn");
+      const helpModal = document.getElementById("help-modal");
+      const helpBackdrop = helpModal.querySelector(".help-backdrop");
+      const helpClose = helpModal.querySelector(".help-close");
+      const helpIframe = helpModal.querySelector("iframe");
+      const helpSrc = helpIframe.getAttribute("src");
 
-    function normalizePw(pw) {
-      return (pw || "").trim();
-    }
+      function normalizePw(pw){ return (pw || "").trim(); }
 
-    function isValidPassword(pw) {
-      const p = normalizePw(pw);
-      if (!p) return false;
-      if (p === "PIMS") return true;
-      return p === "msc";
-    }
-
-    function showTopRightControls() {
-      if (controls) controls.style.display = "flex";
-    }
-
-    function openHelp() {
-      if (!helpModal) return;
-      helpModal.classList.add("is-open");
-      helpModal.setAttribute("aria-hidden", "false");
-      document.body.style.overflow = "hidden";
-    }
-
-    function closeHelp() {
-      if (!helpModal) return;
-      helpModal.classList.remove("is-open");
-      helpModal.setAttribute("aria-hidden", "true");
-      document.body.style.overflow = "";
-
-      // Stop playback by resetting src (prevents audio continuing in background)
-      if (helpIframe && helpSrc) {
-        helpIframe.setAttribute("src", helpSrc);
-      }
-    }
-
-    function submitPassword() {
-      const input = document.getElementById("access-password");
-      const err = document.getElementById("access-error");
-      const pw = normalizePw(input.value);
-
-      if (!isValidPassword(pw)) {
-        err.textContent = "Invalid password.";
-        return;
+      function isValidPassword(pw){
+        return pw === "PIMS" || pw === "msc";
       }
 
-      sessionStorage.setItem("reefshape_password", pw);
-      if (introModal) introModal.style.display = "none";
-      err.textContent = "";
-      showTopRightControls();
-    }
+      function showControls(){
+        controls.style.display = "flex";
+      }
 
-    document.getElementById("enter-button")
-      .addEventListener("click", submitPassword);
+      function openHelp(){
+        helpModal.classList.add("is-open");
+        helpModal.setAttribute("aria-hidden", "false");
+        document.body.style.overflow = "hidden";
+      }
 
-    document.getElementById("access-password")
-      .addEventListener("keydown", (e) => {
+      function closeHelp(){
+        helpModal.classList.remove("is-open");
+        helpModal.setAttribute("aria-hidden", "true");
+        document.body.style.overflow = "";
+        helpIframe.setAttribute("src", helpSrc); // stop playback
+      }
+
+      function submitPassword(){
+        const pw = normalizePw(document.getElementById("access-password").value);
+        const err = document.getElementById("access-error");
+
+        if (!isValidPassword(pw)){
+          err.textContent = "Invalid password.";
+          return;
+        }
+
+        sessionStorage.setItem("reefshape_password", pw);
+        introModal.style.display = "none";
+        err.textContent = "";
+        showControls();
+      }
+
+      document.getElementById("enter-button").onclick = submitPassword;
+      document.getElementById("access-password").onkeydown = e => {
         if (e.key === "Enter") submitPassword();
-      });
+      };
 
-    if (changeBtn) {
-      changeBtn.addEventListener("click", () => {
+      changeBtn.onclick = () => {
         sessionStorage.removeItem("reefshape_password");
-        window.location.reload();
+        location.reload();
+      };
+
+      helpBtn.onclick = openHelp;
+      helpClose.onclick = closeHelp;
+      helpBackdrop.onclick = closeHelp;
+
+      document.addEventListener("keydown", e => {
+        if (e.key === "Escape" && helpModal.classList.contains("is-open")) {
+          closeHelp();
+        }
       });
-    }
 
-    // Help button wiring
-    if (helpBtn) helpBtn.addEventListener("click", openHelp);
-    if (helpClose) helpClose.addEventListener("click", closeHelp);
-    if (helpBackdrop) helpBackdrop.addEventListener("click", closeHelp);
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && helpModal && helpModal.classList.contains("is-open")) {
-        closeHelp();
+      const existing = normalizePw(sessionStorage.getItem("reefshape_password"));
+      if (isValidPassword(existing)){
+        introModal.style.display = "none";
+        showControls();
       }
-    });
-
-    const existing = normalizePw(sessionStorage.getItem("reefshape_password"));
-    if (isValidPassword(existing)) {
-      if (introModal) introModal.style.display = "none";
-      showTopRightControls();
-    }
-  })();
+    })();
   </script>
 </body>
 </html>
