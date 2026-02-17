@@ -1,0 +1,20 @@
+{
+  "projects": [
+    {
+      "key": "msc",
+      "password": "msc",
+      "label": "MSC Project"
+    },
+    {
+      "key": "demo",
+      "password": "DEMO",
+      "label": "Demo Project"
+    },
+    {
+      "key": "pims",
+      "password": "PIMS",
+      "label": "PIMS Master",
+      "isMaster": true
+    }
+  ]
+}
