@@ -6,7 +6,7 @@
       "properties": {
         "id": "bullrun",
         "name": "Bull Run",
-        "password": "msc",
+        "passwords": ["msc"],
 
         "bounds": [-79.24807271641542, 25.4533289508983, -79.24773405382061, 25.45364938850446],
 
@@ -25,7 +25,7 @@
       "properties": {
         "id": "lobohoras",
         "name": "Lobo Horis",
-        "password": "msc",
+		"passwords": ["msc", "demo"],
 
         "bounds": [-79.2255438980711801, 25.4003844450776839, -79.2253517054830922, 25.4005483573436841],
 
@@ -50,7 +50,7 @@
       "properties": {
         "id": "victoryreef",
         "name": "Victory Reef",
-        "password": "msc",
+		"passwords": ["msc", "demo"],
 
         "bounds": [-79.27353423485278, 25.484978144820523, -79.27324819807947, 25.485270471302442],
 
@@ -69,7 +69,7 @@
       "properties": {
         "id": "sandycay",
         "name": "Sandy Cay Reef",
-        "password": "drone",
+		"passwords": ["demo"],
 
         "bounds": [-76.99093376, 26.3947475649, -76.9879637739, 26.403501208],
 

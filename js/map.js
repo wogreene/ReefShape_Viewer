@@ -2,8 +2,9 @@
 
 // ---------------------------
 // Access control (client-side "soft gate")
+// Projects + master access are defined in data/projects.json
+// Site membership is defined in data/sites.geojson via properties.passwords = [ ... ]
 // ---------------------------
-const MASTER_PASSWORD = "PIMS";
 
 function normalizePw(pw) {
   // Case-sensitive by default. If you want case-insensitive, use:
@@ -15,10 +16,39 @@ function getPassword() {
   return normalizePw(sessionStorage.getItem("reefshape_password"));
 }
 
+// Loaded from projects.json (any project with "isMaster": true becomes master)
+let MASTER_PASSWORDS = new Set();
+
+async function loadProjectsConfig() {
+  const data = await fetch("data/projects.json", { cache: "no-store" }).then(r => r.json());
+  const projects = Array.isArray(data.projects) ? data.projects : [];
+  MASTER_PASSWORDS = new Set(
+    projects
+      .filter(p => p && p.isMaster)
+      .map(p => normalizePw(p.password))
+      .filter(Boolean)
+  );
+}
+
+function isMaster(pw) {
+  return MASTER_PASSWORDS.has(normalizePw(pw));
+}
+
 function hasAccess(featureProps, pw) {
   if (!pw) return false;
-  if (pw === MASTER_PASSWORD) return true;
-  return normalizePw(featureProps?.password) === pw;
+  if (isMaster(pw)) return true;
+
+  // New schema: passwords: ["msc","DEMO",...]
+  const pwList = featureProps?.passwords;
+  if (Array.isArray(pwList)) {
+    return pwList.some(p => normalizePw(p) === pw);
+  }
+
+  // Back-compat (optional): legacy schema: password: "msc"
+  const legacy = featureProps?.password;
+  if (legacy) return normalizePw(legacy) === pw;
+
+  return false;
 }
 
 function computeBBoxLonLat(features) {
@@ -122,7 +152,7 @@ async function loadAndAddSites() {
 
   const sitesRaw = await fetch("data/sites.geojson", { cache: "no-store" }).then(r => r.json());
 
-  // Filter sites based on password
+  // Filter sites based on password(s)
   const filteredSites = {
     ...sitesRaw,
     features: (sitesRaw.features || []).filter(f => hasAccess(f.properties, pw))
@@ -172,7 +202,7 @@ async function loadAndAddSites() {
     });
   }
 
-  // NEW behavior: always auto-zoom to whatever sites are accessible for the password
+  // Always auto-zoom to whatever sites are accessible for the password
   const bbox = computeBBoxLonLat(filteredSites.features);
   if (bbox) {
     map.fitBounds(bbox, {
@@ -181,13 +211,20 @@ async function loadAndAddSites() {
     });
   }
 
-  // If they entered a valid password but no sites matched, warn in console
   if ((filteredSites.features || []).length === 0) {
     console.warn("No sites available for this password.");
   }
 }
 
 map.on("load", async () => {
+  // Load projects.json first so master-password logic is correct
+  try {
+    await loadProjectsConfig();
+  } catch (e) {
+    console.error("Failed to load data/projects.json (master access may not work):", e);
+    MASTER_PASSWORDS = new Set(); // fallback: no masters if config fails
+  }
+
   // If they already have a password (auto-enter path), load sites now
   await loadAndAddSites();
 
@@ -220,7 +257,6 @@ map.on("click", "sites", e => {
   if (id === "victoryreef") {
     openViewChoiceModal(id, name);
   } else {
-    // default behavior
     window.location.href = `viewer.html?id=${id}`;
   }
 });
@@ -252,7 +288,6 @@ function openViewChoiceModal(id, name) {
     modal.style.display = "none";
   };
 
-  // Click outside to close
   modal.onclick = e => {
     if (e.target === modal) modal.style.display = "none";
   };

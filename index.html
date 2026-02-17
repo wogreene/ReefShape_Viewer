@@ -118,7 +118,7 @@
       <div id="access-panel">
         <input
           id="access-password"
-          type="text"
+          type="password"
           placeholder="Enter project password"
           autocomplete="off"
           autocapitalize="none"
@@ -181,8 +181,9 @@
 
       function normalizePw(pw){ return (pw || "").trim(); }
 
-      function isValidPassword(pw){
-        return pw === "PIMS" || pw === "msc";
+      async function loadProjects(){
+        const data = await fetch("data/projects.json", { cache: "no-store" }).then(r => r.json());
+        return Array.isArray(data.projects) ? data.projects : [];
       }
 
       function showControls(){
@@ -202,16 +203,36 @@
         helpIframe.setAttribute("src", helpSrc); // stop playback
       }
 
-      function submitPassword(){
+      function saveProjectSelection(project, password){
+        sessionStorage.setItem("reefshape_password", password);
+        sessionStorage.setItem("reefshape_project_key", project?.key || "");
+      }
+
+      async function submitPassword(){
         const pw = normalizePw(document.getElementById("access-password").value);
         const err = document.getElementById("access-error");
 
-        if (!isValidPassword(pw)){
+        if (!pw){
+          err.textContent = "Enter a password.";
+          return;
+        }
+
+        let projects;
+        try{
+          projects = await loadProjects();
+        } catch(e){
+          console.error(e);
+          err.textContent = "Could not load projects.json.";
+          return;
+        }
+
+        const match = projects.find(p => normalizePw(p?.password) === pw);
+        if (!match){
           err.textContent = "Invalid password.";
           return;
         }
 
-        sessionStorage.setItem("reefshape_password", pw);
+        saveProjectSelection(match, pw);
         introModal.style.display = "none";
         err.textContent = "";
         showControls();
@@ -224,6 +245,7 @@
 
       changeBtn.onclick = () => {
         sessionStorage.removeItem("reefshape_password");
+        sessionStorage.removeItem("reefshape_project_key");
         location.reload();
       };
 
@@ -237,11 +259,22 @@
         }
       });
 
-      const existing = normalizePw(sessionStorage.getItem("reefshape_password"));
-      if (isValidPassword(existing)){
-        introModal.style.display = "none";
-        showControls();
-      }
+      (async function autoEnterIfValid(){
+        const existing = normalizePw(sessionStorage.getItem("reefshape_password"));
+        if (!existing) return;
+
+        try{
+          const projects = await loadProjects();
+          const match = projects.find(p => normalizePw(p?.password) === existing);
+          if (match){
+            introModal.style.display = "none";
+            showControls();
+          }
+        } catch (e){
+          // If projects.json fails to load, do not auto-enter.
+          console.warn("projects.json failed to load; staying on splash");
+        }
+      })();
     })();
   </script>
 </body>

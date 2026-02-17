@@ -30,9 +30,9 @@ const JSMap = globalThis.Map;
 
 // --------------------------------------------------
 // Password gate helpers (client-side soft gate)
+// - Projects + master access come from data/projects.json
+// - Site membership comes from feature.properties.passwords = [ ... ]
 // --------------------------------------------------
-
-const MASTER_PASSWORD = "PIMS";
 
 function normalizePw(pw) {
   // Case-sensitive by default. If you want case-insensitive passwords, use:
@@ -44,15 +44,44 @@ function getSessionPassword() {
   return normalizePw(sessionStorage.getItem("reefshape_password"));
 }
 
-function featureAllowsAccess(featureProps, pw) {
-  if (!pw) return false;
-  if (pw === MASTER_PASSWORD) return true;
-  return normalizePw(featureProps?.password) === pw;
-}
-
 function bounceToIndex(message) {
   if (message) alert(message);
   window.location.replace("./index.html");
+}
+
+// Loaded from projects.json (any project with "isMaster": true becomes master)
+let MASTER_PASSWORDS = new Set();
+
+async function loadProjectsConfig() {
+  const data = await fetch("data/projects.json", { cache: "no-store" }).then(r => r.json());
+  const projects = Array.isArray(data.projects) ? data.projects : [];
+  MASTER_PASSWORDS = new Set(
+    projects
+      .filter(p => p && p.isMaster)
+      .map(p => normalizePw(p.password))
+      .filter(Boolean)
+  );
+}
+
+function isMaster(pw) {
+  return MASTER_PASSWORDS.has(normalizePw(pw));
+}
+
+function featureAllowsAccess(featureProps, pw) {
+  if (!pw) return false;
+  if (isMaster(pw)) return true;
+
+  // New schema: passwords: ["msc","DEMO",...]
+  const pwList = featureProps?.passwords;
+  if (Array.isArray(pwList)) {
+    return pwList.some(p => normalizePw(p) === pw);
+  }
+
+  // Back-compat (optional): legacy schema: password: "msc"
+  const legacy = featureProps?.password;
+  if (legacy) return normalizePw(legacy) === pw;
+
+  return false;
 }
 
 // --------------------------------------------------
@@ -73,6 +102,14 @@ if (!sessionPw) {
   throw new Error("Missing session password");
 }
 
+// Load projects config first (for master-password logic)
+try {
+  await loadProjectsConfig();
+} catch (e) {
+  console.error("Failed to load data/projects.json (master access may not work):", e);
+  MASTER_PASSWORDS = new Set(); // fallback: no masters if config fails
+}
+
 // --------------------------------------------------
 // Load metadata (and enforce access)
 // --------------------------------------------------
@@ -85,7 +122,7 @@ if (!feature) {
   throw new Error("Invalid reef id");
 }
 
-// Enforce access: master sees all; otherwise must match feature.properties.password
+// Enforce access: master sees all; otherwise must match feature.properties.passwords (or legacy password)
 if (!featureAllowsAccess(feature.properties, sessionPw)) {
   bounceToIndex("Access denied for this site with the current password.");
   throw new Error("Access denied");
@@ -160,7 +197,6 @@ const coralColorById = new JSMap((coralPalette.Labels || []).map(l => [String(l.
 const coralNameById = new JSMap((coralPalette.Labels || []).map(l => [String(l.id), l.name]));
 
 function getSpeciesIdFromFeature(feat) {
-  // Prioritize your schema
   const candidates = ["TL_Class", "species", "label", "class", "id", "name", "Species", "Label", "Class", "Id", "Name"];
   for (const k of candidates) {
     const v = feat.get(k);
@@ -172,7 +208,6 @@ function getSpeciesIdFromFeature(feat) {
 // Style cache
 const styleCache = new JSMap();
 
-// Filled polygons using species color
 function overlayStyleFn(feat) {
   const speciesId = getSpeciesIdFromFeature(feat) || "Unidentified_coral";
   const rgb =
@@ -180,7 +215,6 @@ function overlayStyleFn(feat) {
     coralColorById.get("Unidentified_coral") ||
     [255, 255, 255];
 
-  // Fill ~35% opacity; stroke more visible
   const fillRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.35)`;
   const strokeRGBA = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.85)`;
 
@@ -274,10 +308,8 @@ map.addInteraction(new DragRotate({ condition: platformModifierKeyOnly }));
 // Black background
 map.getViewport().style.background = "black";
 
-// Scalebar 
-map.addControl(new ScaleLine({ units: "metric", bar: true, steps: 4, text: true, minWidth: 120 }) );
-
-
+// Scalebar
+map.addControl(new ScaleLine({ units: "metric", bar: true, steps: 4, text: true, minWidth: 120 }));
 
 // --------------------------------------------------
 // Popup for coral info (species + area)
@@ -306,11 +338,9 @@ const popupOverlay = new Overlay({
 map.addOverlay(popupOverlay);
 
 function featureAreaCm2(feat) {
-  // Prefer TL_Area (fast)
   const a = feat.get("TL_Area");
   if (typeof a === "number" && isFinite(a)) return a;
 
-  // Fallback: geodesic geometry area (m^2 -> cm^2)
   const geom = feat.getGeometry();
   if (!geom) return 0;
   const m2 = getGeodesicArea(geom, { projection: view.getProjection() });
@@ -394,7 +424,6 @@ coverEl.textContent = "View Area: —\nCoral Cover: —\nColonies: —\nShannon 
 map.getViewport().appendChild(coverEl);
 
 function extentAreaM2From4326Extent(ext) {
-  // ext = [minLon, minLat, maxLon, maxLat]
   const ring = [
     [ext[0], ext[1]],
     [ext[2], ext[1]],
@@ -406,11 +435,10 @@ function extentAreaM2From4326Extent(ext) {
     { type: "Polygon", coordinates: [ring] },
     { dataProjection: "EPSG:4326", featureProjection: "EPSG:4326" }
   );
-  return getGeodesicArea(geom, { projection: view.getProjection() }); // m^2
+  return getGeodesicArea(geom, { projection: view.getProjection() });
 }
 
 function updateCoverageBox() {
-  // Only meaningful when overlay is visible and has a source
   if (!overlayLayer.getVisible() || !overlayLayer.getSource()) {
     coverEl.innerHTML =
       `View Area: —<br>` +
@@ -445,7 +473,6 @@ function updateCoverageBox() {
   const src = overlayLayer.getSource();
   const feats = src.getFeaturesInExtent(ext);
 
-  // Total coral area + per-species area (cm^2)
   let coralAreaCm2 = 0;
   const areaBySpecies = new JSMap();
 
@@ -459,14 +486,13 @@ function updateCoverageBox() {
 
   const coralAreaM2 = coralAreaCm2 / 10000;
   let pct = (coralAreaM2 / viewAreaM2) * 100;
-  pct = Math.max(0, Math.min(100, pct)); // cap
+  pct = Math.max(0, Math.min(100, pct));
 
-  // Area-weighted Shannon diversity: H' = -Σ p_i ln(p_i)
   let shannon = 0;
   if (coralAreaCm2 > 0) {
     for (const a of areaBySpecies.values()) {
       const p = a / coralAreaCm2;
-      if (p > 0) shannon += -p * Math.log(p); // natural log
+      if (p > 0) shannon += -p * Math.log(p);
     }
   }
 
@@ -510,7 +536,6 @@ select.addEventListener("change", () => {
   reefLayer.setSource(createGeoTIFFSource(timepoints[tp]));
   syncOverlayUI(tp);
 
-  // close popup
   popupEl.style.display = "none";
   popupOverlay.setPosition(undefined);
 
@@ -523,7 +548,6 @@ if (overlayToggle) {
     const tp = select.value;
     const url = overlayUrlFor(tp);
 
-    // close popup
     popupEl.style.display = "none";
     popupOverlay.setPosition(undefined);
 
