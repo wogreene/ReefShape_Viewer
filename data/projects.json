@@ -10,6 +10,11 @@
       "password": "demo",
       "label": "Demo Project"
     },
+        {
+      "key": "techhub",
+      "password": "techhub",
+      "label": "Tech Hub Project"
+    },
     {
       "key": "pims",
       "password": "PIMS",

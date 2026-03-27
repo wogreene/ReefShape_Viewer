@@ -82,6 +82,25 @@
         "type": "Point",
         "coordinates": [-76.989123, 26.398575]
       }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "Nirvana",
+        "name": "Nirvana",
+		"passwords": ["techhub"],
+
+        "bounds": [-81.7364055819724200,12.4928893902624285,-81.7292872831474142,12.5075317975584284],
+
+        "timepoints": {
+          "20260126": "https://dl.dropboxusercontent.com/scl/fi/o4gjp468vajt0egkhs4fw/20260126_NirvanaLow_cog.tif?rlkey=fjzmw8slu3vo2g3ok1z4hqtuf"
+        },
+        "overlays": {"20260126": "overlays/NirvanaLow_LC.geojson"}
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-81.734, 12.498]
+      }
     }
   ]
 }
