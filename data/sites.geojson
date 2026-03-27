@@ -101,6 +101,25 @@
         "type": "Point",
         "coordinates": [-81.734, 12.498]
       }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "LittleReef",
+        "name": "Little Reef",
+		"passwords": ["techhub"],
+
+        "bounds": [-81.6898505184731789,12.5806797260731003, -81.6829963028251740,12.5867632153531002],
+
+        "timepoints": {
+          "20260126": "https://dl.dropboxusercontent.com/scl/fi/qzolhmhiq1brcs5jmi8a8/20260126_LittleReef_cog.tif?rlkey=9nlerl7rh3jdb61ayxy3zwk5j"
+        },
+        "overlays": {"20260126": "overlays/LittleReef_LC.geojson"}
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-81.685921, 12.583849]
+      }
     }
   ]
 }
