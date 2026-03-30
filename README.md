@@ -1,4 +1,4 @@
-# Reef Map Viewer
+# ReefShape Viewer
 
 GitHub Pages site for browsing large georeferenced coral reef
 photomosaics via MapLibre and Cloud Optimized GeoTIFFs (COGs). Serves as a viewer application for data collected using our <a href="https://github.com/Perry-Institute/ReefShape">ReefShape</a> protocol and analyzed using <a href="https://github.com/cnr-isti-vclab/TagLab">TagLab</a>.
