@@ -250,12 +250,18 @@ class VoxelOctree {
   isSolid(px, py, pz) {
     const { gridMin, gridMax, voxelResolution, treeDepth, rootVoxels, nodes, leafData } = this;
 
+    // The format spec treats out-of-bounds as solid (it's meant to stop a
+    // first-person walking camera from wandering into unscanned space with
+    // no floor). That's the wrong call for us: this is a free-orbiting
+    // overview camera that legitimately wants to pull back for a wide shot
+    // beyond the tightly-cropped scan volume, so only actual occupied
+    // voxels should ever block movement here.
     if (
       px < gridMin[0] || px > gridMax[0] ||
       py < gridMin[1] || py > gridMax[1] ||
       pz < gridMin[2] || pz > gridMax[2]
     ) {
-      return true;
+      return false;
     }
 
     let vx = (px - gridMin[0]) / voxelResolution;
@@ -432,7 +438,15 @@ const updateCamera = () => {
   // moving there. No per-input special-casing needed - every pan/orbit/zoom/
   // WASD update funnels through here. Fails open (no blocking) until the
   // voxel data has loaded, or if this reef has none.
-  if (voxelOctree) {
+  //
+  // Pulling back (distance increasing) is exempt: the voxel data is a
+  // flood fill from a seed point in the open water, so it's only ever
+  // "solid" beyond the fill - which includes the region above the actual
+  // water surface, since the fill has nowhere to go once it reaches the
+  // top of the captured volume. That's a real boundary of the scan, not
+  // reef material, and zooming out to frame the whole reef can legitimately
+  // cross it. Getting closer is exactly the case this exists to stop.
+  if (voxelOctree && distance <= lastGoodDistance) {
     const p = worldToVoxelSpace(cameraPosition);
     if (voxelOctree.isSolid(p.x, p.y, p.z)) {
       yaw = lastGoodYaw;
@@ -446,6 +460,11 @@ const updateCamera = () => {
       lastGoodDistance = distance;
       lastGoodTarget.copy(target);
     }
+  } else {
+    lastGoodYaw = yaw;
+    lastGoodPitch = pitch;
+    lastGoodDistance = distance;
+    lastGoodTarget.copy(target);
   }
 
   cameraRig.setPosition(cameraPosition);
@@ -458,8 +477,14 @@ const getFrameDistance = radius => {
 };
 
 const clampDistance = value => {
-  const minDistance = Math.max(sceneRadius * 0.008, 0.008);
-  const maxDistance = Math.max(sceneRadius * 40, 30);
+  // sceneRadius comes from the splat's raw AABB, which photogrammetry
+  // captures often blow out with a handful of stray outlier gaussians far
+  // from the actual reef - scaling the close-up limit off it (as this used
+  // to) made zooming in stop far earlier than intended. Collision (see
+  // VoxelOctree above) is the real stopping point for getting close now;
+  // this floor just keeps distance off zero/negative.
+  const minDistance = 0.001;
+  const maxDistance = Math.max(sceneRadius * 60, 60);
   return Math.max(minDistance, Math.min(maxDistance, value));
 };
 
@@ -537,23 +562,54 @@ const updateBasis = () => {
   }
 };
 
-// Horizontal pan driven by a drag delta - same {right, flatForward} basis
-// WASD/arrows use, so a left-drag (or one-finger touch-drag) feels like the
-// same "glide across the reef" motion, just under direct pointer control
-// instead of key-hold + damping.
-const panHorizontal = (deltaX, deltaY) => {
+// Casts a ray from the camera through a screen pixel and intersects it with
+// the horizontal plane at world height `planeY`, writing the result into
+// `out`. Returns null if the ray is (near) parallel to the plane or points
+// away from it - shouldn't normally happen given pitch is always tilted
+// well away from the horizon, but a drag flung to the edge of the screen at
+// a low FOV could still graze it.
+const rayDir = new Vec3();
+function screenToGroundPoint(screenX, screenY, planeY, out) {
+  const width = canvas.clientWidth || window.innerWidth;
+  const height = canvas.clientHeight || window.innerHeight;
+  const ndcX = (screenX / width) * 2 - 1;
+  const ndcY = 1 - (screenY / height) * 2;
+  const tanHalfFovY = Math.tan((fov * Math.PI) / 360);
+  const tanHalfFovX = tanHalfFovY * (width / height);
+
+  rayDir
+    .copy(forward)
+    .addScaled(right, ndcX * tanHalfFovX)
+    .addScaled(up, ndcY * tanHalfFovY)
+    .normalize();
+
+  if (Math.abs(rayDir.y) < 1e-6) return null;
+
+  const t = (planeY - cameraPosition.y) / rayDir.y;
+  if (t <= 0) return null;
+
+  out.copy(cameraPosition).addScaled(rayDir, t);
+  return out;
+}
+
+// True "grab and drag" pan: the ground point under the cursor at the start
+// of a move stays pinned under the cursor at the end of it, solved via
+// ray/ground-plane intersection rather than a flat FOV*distance
+// approximation. The old approximation assumed the camera looked straight
+// along its forward axis at a plane perpendicular to it, which increasingly
+// under/over-shoots the farther pitch tilts away from straight-down -
+// exactly where dragging started feeling disconnected from the cursor.
+const rayHitPrev = new Vec3();
+const rayHitCur = new Vec3();
+const panDrag = (prevX, prevY, curX, curY) => {
   updateBasis();
 
-  const height = canvas.clientHeight || window.innerHeight;
-  const width = canvas.clientWidth || window.innerWidth;
-  const halfHeight = distance * Math.tan((fov * Math.PI) / 360);
-  const halfWidth = halfHeight * (width / height);
+  const planeY = target.y;
+  const hitPrev = screenToGroundPoint(prevX, prevY, planeY, rayHitPrev);
+  const hitCur = screenToGroundPoint(curX, curY, planeY, rayHitCur);
+  if (!hitPrev || !hitCur) return;
 
-  nextTarget
-    .copy(right)
-    .mulScalar((-deltaX / width) * halfWidth * 2)
-    .add(flatForward.clone().mulScalar((deltaY / height) * halfHeight * 2));
-
+  nextTarget.copy(hitPrev).sub(hitCur);
   target.add(nextTarget);
   updateCamera();
 };
@@ -629,13 +685,15 @@ canvas.addEventListener("pointermove", event => {
 
   if (!dragMode) return;
 
-  const deltaX = event.clientX - lastPointerX;
-  const deltaY = event.clientY - lastPointerY;
+  const prevX = lastPointerX;
+  const prevY = lastPointerY;
+  const deltaX = event.clientX - prevX;
+  const deltaY = event.clientY - prevY;
   lastPointerX = event.clientX;
   lastPointerY = event.clientY;
 
   if (dragMode === "pan") {
-    panHorizontal(deltaX, deltaY);
+    panDrag(prevX, prevY, event.clientX, event.clientY);
   } else if (dragMode === "orbit") {
     orbitDrag(deltaX, deltaY);
   }
@@ -670,7 +728,7 @@ canvas.addEventListener(
     event.preventDefault();
 
     if (event.shiftKey) {
-      panHorizontal(event.deltaX, event.deltaY);
+      panDrag(event.clientX - event.deltaX, event.clientY - event.deltaY, event.clientX, event.clientY);
       return;
     }
 
@@ -829,6 +887,62 @@ function createCausticsQuad() {
         vec3 color = vec3(0.65, 0.85, 1.0) * bands * uIntensity;
         gl_FragColor = vec4(color, bands * uIntensity);
       }
+    `,
+    // WGSL twin of the shaders above, so WebGPU (the default renderer) runs
+    // this natively instead of needing a GLSL->WGSL transpiler the engine
+    // package doesn't bundle (glslang/twgsl). Syntax verified against the
+    // engine's own internal shader-desc usage (DebugShader in the bundled
+    // build): `attribute`/`uniform`/`varying name: type;` declarations,
+    // uniforms read back via `uniform.name`, @vertex/@fragment entry points
+    // taking a VertexInput/FragmentInput and returning a VertexOutput/
+    // FragmentOutput whose `.position`/`.color` (plus declared varyings)
+    // the engine wires up automatically.
+    vertexWGSL: `
+      attribute aPosition: vec3f;
+      attribute aUv0: vec2f;
+      uniform matrix_model: mat4x4f;
+      uniform matrix_viewProjection: mat4x4f;
+      varying vUv: vec2f;
+      @vertex fn vertexMain(input: VertexInput) -> VertexOutput {
+        var output: VertexOutput;
+        output.vUv = input.aUv0;
+        output.position = uniform.matrix_viewProjection * uniform.matrix_model * vec4f(input.aPosition, 1.0);
+        return output;
+      }
+    `,
+    fragmentWGSL: `
+      varying vUv: vec2f;
+      uniform uTime: f32;
+      uniform uScale: f32;
+      uniform uSpeed: f32;
+      uniform uIntensity: f32;
+
+      fn wgslMod(x: vec2f, y: f32) -> vec2f {
+        return x - y * floor(x / y);
+      }
+
+      @fragment fn fragmentMain(input: FragmentInput) -> FragmentOutput {
+        var output: FragmentOutput;
+
+        let p = wgslMod(input.vUv * uniform.uScale, 1.0) - vec2f(0.5);
+        var i = p;
+        var c: f32 = 0.0;
+        let inten: f32 = 0.06;
+
+        for (var n: i32 = 0; n < 5; n++) {
+          let t = uniform.uTime * uniform.uSpeed * (1.0 - (3.5 / f32(n + 1)));
+          i = p + vec2f(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x));
+          let d = vec2f(p.x / (sin(i.x + t) / inten), p.y / (cos(i.y + t) / inten));
+          c = c + 1.0 / length(d);
+        }
+        c = c / 5.0;
+        c = 1.17 - pow(c, 1.4);
+        let bands = pow(clamp(c, 0.0, 1.0), 8.0);
+
+        let color = vec3f(0.65, 0.85, 1.0) * bands * uniform.uIntensity;
+        output.color = vec4f(color, bands * uniform.uIntensity);
+        return output;
+      }
     `
   });
 
@@ -873,23 +987,21 @@ function positionCausticsForAabb(splat, aabb) {
   );
 }
 
-// The caustics shader is hand-written GLSL. WebGL2 runs it natively; WebGPU
-// would need a glslang/twgsl transpiler that isn't bundled with the engine
-// package, so on WebGPU we skip it entirely rather than show a dead toggle.
-const causticsSupported = !device.isWebGPU;
-
-if (causticsSupported) {
-  try {
-    const created = createCausticsQuad();
-    causticsEntity = created.entity;
-    causticsMaterial = created.material;
-  } catch (e) {
-    console.warn("Caustics overlay unavailable:", e);
-  }
+// The caustics shader ships both GLSL and WGSL, so it runs natively on
+// either backend - no renderer switch required. Still wrapped in a
+// try/catch: if something about this specific shader turns out to be
+// unhappy on a given device/browser, the toggle just hides instead of
+// breaking the rest of the viewer.
+try {
+  const created = createCausticsQuad();
+  causticsEntity = created.entity;
+  causticsMaterial = created.material;
+} catch (e) {
+  console.warn("Caustics overlay unavailable:", e);
 }
 
 const causticsToggleWrap = document.getElementById("causticsToggleWrap");
-if (!causticsSupported || !causticsEntity) {
+if (!causticsEntity) {
   if (causticsToggleWrap) causticsToggleWrap.style.display = "none";
 } else if (causticsToggle) {
   causticsToggle.addEventListener("change", () => {
