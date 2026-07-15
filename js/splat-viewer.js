@@ -38,6 +38,7 @@ import {
   SEMANTIC_TEXCOORD0,
   BLEND_ADDITIVE,
   CULLFACE_NONE,
+  ADDRESS_REPEAT,
   DEVICETYPE_WEBGPU,
   DEVICETYPE_WEBGL2,
   XRTYPE_VR,
@@ -174,9 +175,9 @@ function hideLoader() {
 // PlayCanvas app setup
 // --------------------------------------------------
 
-// The caustics shader is WebGL-only (see below), so let people opt into
-// forcing WebGL2 over WebGPU if they want to see it. Persisted across
-// reloads since switching graphics backends requires a fresh page load.
+// Lets people opt into forcing WebGL2 over WebGPU for comparison/debugging.
+// Persisted across reloads since switching graphics backends requires a
+// fresh page load.
 const FORCE_WEBGL_KEY = "reefshape_force_webgl";
 const forceWebGL = () => localStorage.getItem(FORCE_WEBGL_KEY) === "1";
 
@@ -215,9 +216,13 @@ if (app.scene.gsplat) {
 const cameraRig = new Entity("CameraRig");
 app.root.addChild(cameraRig);
 
+// Clear-water blue rather than a flat black void where there's no
+// geometry - and matched to FOG_COLOR below (same literal values) so a
+// fully-fogged-out splat blends seamlessly into the "empty" background
+// instead of visibly fading to a different shade at the horizon.
 const camera = new Entity("Camera");
 camera.addComponent("camera", {
-  clearColor: new Color(0.02, 0.025, 0.035),
+  clearColor: new Color(0.035, 0.22, 0.28),
   fov: 75
 });
 cameraRig.addChild(camera);
@@ -408,6 +413,19 @@ let touchCenterX = 0;
 let touchCenterY = 0;
 let pinchDist = 0;
 
+// Double-tap-to-zoom (touch): tracked separately from drag state since a
+// "tap" is really a pointerdown/pointerup pair with negligible movement/
+// duration in between, not a distinct gesture the pointer handlers already
+// model. Mouse gets this for free via the native "dblclick" event instead.
+const pointerDownInfo = new Map(); // pointerId -> {x, y, time}
+const TAP_MAX_DURATION_MS = 300;
+const TAP_MAX_MOVEMENT_PX = 10;
+const DOUBLE_TAP_MAX_INTERVAL_MS = 350;
+const DOUBLE_TAP_MAX_DISTANCE_PX = 30;
+let lastTapTime = 0;
+let lastTapX = 0;
+let lastTapY = 0;
+
 const clampPitch = p => Math.max(MIN_PITCH, Math.min(MAX_PITCH, p));
 
 const updateCameraPosition = () => {
@@ -446,15 +464,40 @@ const updateCamera = () => {
   // top of the captured volume. That's a real boundary of the scan, not
   // reef material, and zooming out to frame the whole reef can legitimately
   // cross it. Getting closer is exactly the case this exists to stop.
-  if (voxelOctree && distance <= lastGoodDistance) {
+  const isBlocked = () => {
     const p = worldToVoxelSpace(cameraPosition);
-    if (voxelOctree.isSolid(p.x, p.y, p.z)) {
-      yaw = lastGoodYaw;
-      pitch = lastGoodPitch;
-      distance = lastGoodDistance;
-      target.copy(lastGoodTarget);
+    return voxelOctree.isSolid(p.x, p.y, p.z);
+  };
+
+  if (voxelOctree && distance <= lastGoodDistance) {
+    if (isBlocked()) {
+      // Full move blocked - before giving up entirely, try sliding along
+      // just one horizontal target axis (keeping yaw/pitch/distance as
+      // requested). Reef terrain gets more irregular the farther you
+      // explore from the open starting pocket, and a hard "undo the whole
+      // gesture" on the first graze felt broken - a wall should let you
+      // slide along it, not stonewall the entire drag.
+      const candidateX = target.x;
+      const candidateZ = target.z;
+
+      target.set(candidateX, target.y, lastGoodTarget.z);
       updateBasis();
-    } else {
+
+      if (isBlocked()) {
+        target.set(lastGoodTarget.x, target.y, candidateZ);
+        updateBasis();
+
+        if (isBlocked()) {
+          yaw = lastGoodYaw;
+          pitch = lastGoodPitch;
+          distance = lastGoodDistance;
+          target.copy(lastGoodTarget);
+          updateBasis();
+        }
+      }
+    }
+
+    if (!isBlocked()) {
       lastGoodYaw = yaw;
       lastGoodPitch = pitch;
       lastGoodDistance = distance;
@@ -569,7 +612,7 @@ const updateBasis = () => {
 // well away from the horizon, but a drag flung to the edge of the screen at
 // a low FOV could still graze it.
 const rayDir = new Vec3();
-function screenToGroundPoint(screenX, screenY, planeY, out) {
+function computeRayDir(screenX, screenY, out) {
   const width = canvas.clientWidth || window.innerWidth;
   const height = canvas.clientHeight || window.innerHeight;
   const ndcX = (screenX / width) * 2 - 1;
@@ -577,12 +620,15 @@ function screenToGroundPoint(screenX, screenY, planeY, out) {
   const tanHalfFovY = Math.tan((fov * Math.PI) / 360);
   const tanHalfFovX = tanHalfFovY * (width / height);
 
-  rayDir
+  return out
     .copy(forward)
     .addScaled(right, ndcX * tanHalfFovX)
     .addScaled(up, ndcY * tanHalfFovY)
     .normalize();
+}
 
+function screenToGroundPoint(screenX, screenY, planeY, out) {
+  computeRayDir(screenX, screenY, rayDir);
   if (Math.abs(rayDir.y) < 1e-6) return null;
 
   const t = (planeY - cameraPosition.y) / rayDir.y;
@@ -611,6 +657,39 @@ const panDrag = (prevX, prevY, curX, curY) => {
 
   nextTarget.copy(hitPrev).sub(hitCur);
   target.add(nextTarget);
+  updateCamera();
+};
+
+// Zoom toward whatever world point is under the cursor/pinch-center rather
+// than always toward the orbit target: solves for the target shift that
+// keeps that point fixed on screen while distance changes, so zooming in
+// on something off-center actually moves you toward it instead of just
+// changing FOV-like scale around whatever the target happened to be.
+const zoomRayDir = new Vec3();
+const zoomAtScreenPoint = (screenX, screenY, factor) => {
+  updateBasis();
+
+  const groundPoint = screenToGroundPoint(screenX, screenY, target.y, rayHitPrev);
+  const newDistance = clampDistance(distance * factor);
+
+  if (!groundPoint) {
+    distance = newDistance;
+    updateCamera();
+    return;
+  }
+
+  computeRayDir(screenX, screenY, zoomRayDir);
+
+  if (Math.abs(zoomRayDir.y) > 1e-6) {
+    const tPrime = (newDistance * forward.y) / zoomRayDir.y;
+    target.set(
+      groundPoint.x - tPrime * zoomRayDir.x + newDistance * forward.x,
+      target.y,
+      groundPoint.z - tPrime * zoomRayDir.z + newDistance * forward.z
+    );
+  }
+
+  distance = newDistance;
   updateCamera();
 };
 
@@ -643,6 +722,7 @@ canvas.addEventListener("pointerdown", event => {
       dragMode = "pan";
       lastPointerX = event.clientX;
       lastPointerY = event.clientY;
+      pointerDownInfo.set(event.pointerId, { x: event.clientX, y: event.clientY, time: performance.now() });
     } else if (activePointers.size === 2) {
       dragMode = "touch2";
       const { cx, cy, dist } = touchCenterAndDist();
@@ -671,10 +751,10 @@ canvas.addEventListener("pointermove", event => {
     // Two fingers moving together => orbit (mirrors right-click-drag).
     orbitDrag(cx - touchCenterX, cy - touchCenterY);
 
-    // Fingers moving apart/together => pinch-zoom.
+    // Fingers moving apart/together => pinch-zoom, centered on the
+    // pinch midpoint rather than the orbit target.
     if (pinchDist > 0) {
-      distance = clampDistance(distance * (pinchDist / dist));
-      updateCamera();
+      zoomAtScreenPoint(cx, cy, pinchDist / dist);
     }
 
     touchCenterX = cx;
@@ -706,6 +786,9 @@ const endPointerDrag = event => {
     canvas.releasePointerCapture(event.pointerId);
   }
 
+  const downInfo = pointerDownInfo.get(event.pointerId);
+  pointerDownInfo.delete(event.pointerId);
+
   if (activePointers.size === 0) {
     dragMode = null;
   } else if (activePointers.size === 1) {
@@ -716,11 +799,34 @@ const endPointerDrag = event => {
     lastPointerX = pos.x;
     lastPointerY = pos.y;
   }
+
+  if (event.pointerType === "touch" && downInfo) {
+    const heldMs = performance.now() - downInfo.time;
+    const movedPx = Math.hypot(event.clientX - downInfo.x, event.clientY - downInfo.y);
+
+    if (heldMs < TAP_MAX_DURATION_MS && movedPx < TAP_MAX_MOVEMENT_PX) {
+      const now = performance.now();
+      const sinceLastTap = now - lastTapTime;
+      const distFromLastTap = Math.hypot(event.clientX - lastTapX, event.clientY - lastTapY);
+
+      if (sinceLastTap < DOUBLE_TAP_MAX_INTERVAL_MS && distFromLastTap < DOUBLE_TAP_MAX_DISTANCE_PX) {
+        zoomAtScreenPoint(event.clientX, event.clientY, 0.5);
+        lastTapTime = 0; // consume - a third tap starts a fresh pair, not a triple
+      } else {
+        lastTapTime = now;
+        lastTapX = event.clientX;
+        lastTapY = event.clientY;
+      }
+    }
+  }
 };
 
 canvas.addEventListener("pointerup", endPointerDrag);
 canvas.addEventListener("pointercancel", endPointerDrag);
 canvas.addEventListener("contextmenu", event => event.preventDefault());
+canvas.addEventListener("dblclick", event => {
+  zoomAtScreenPoint(event.clientX, event.clientY, 0.5);
+});
 
 canvas.addEventListener(
   "wheel",
@@ -740,8 +846,7 @@ canvas.addEventListener(
     }
 
     const zoomSpeed = event.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
-    distance = clampDistance(distance * (1 + event.deltaY * zoomSpeed));
-    updateCamera();
+    zoomAtScreenPoint(event.clientX, event.clientY, 1 + event.deltaY * zoomSpeed);
   },
   { passive: false }
 );
@@ -829,6 +934,46 @@ let causticsEntity = null;
 let causticsMaterial = null;
 let causticsTime = 0;
 
+// Real caustics texture (a tileable Worley/cellular "F2-F1" ridge network -
+// bright thin veins at cell boundaries, dark interiors), sampled the same
+// way PlayCanvas's own underwater water script does it (engine PR #9029,
+// scripts/esm/water.mjs): two independently-scrolling copies of the same
+// texture, combined and pushed through a steep threshold. That's what
+// actually gives the fine, fast, sharp-edged look real caustics have - no
+// procedural function we tried (raymarched singularities, value noise)
+// reproduced it as convincingly as just sampling a proper network texture.
+let causticsTexture = null;
+let latestSplatForCaustics = null;
+let latestAabbForCaustics = null;
+
+// The quad is only created once the texture has actually finished loading
+// (see the "load" handler below) rather than up front with the sampler
+// unset.
+function loadCausticsTexture() {
+  const asset = new Asset("causticsMap", "texture", { url: "img/caustics.png" });
+  asset.on("load", () => {
+    causticsTexture = asset.resource;
+    causticsTexture.addressU = ADDRESS_REPEAT;
+    causticsTexture.addressV = ADDRESS_REPEAT;
+
+    try {
+      const created = createCausticsQuad();
+      causticsEntity = created.entity;
+      causticsMaterial = created.material;
+      if (latestAabbForCaustics) {
+        positionCausticsForAabb(latestSplatForCaustics, latestAabbForCaustics);
+      }
+    } catch (e) {
+      console.warn("Caustics overlay unavailable:", e);
+    }
+
+    setupCausticsToggle();
+  });
+  asset.on("error", e => console.warn("Caustics texture failed to load:", e));
+  app.assets.add(asset);
+  app.assets.load(asset);
+}
+
 function createCausticsQuad() {
   const mesh = new Mesh(device);
   mesh.setPositions([-0.5, 0, -0.5, 0.5, 0, -0.5, 0.5, 0, 0.5, -0.5, 0, 0.5]);
@@ -856,47 +1001,25 @@ function createCausticsQuad() {
     fragmentGLSL: `
       precision mediump float;
       varying vec2 vUv;
+      uniform sampler2D uCausticsMap;
       uniform float uTime;
       uniform float uScale;
       uniform float uSpeed;
       uniform float uIntensity;
 
-      // A raymarched-looking 2D interference pattern (the classic real-time
-      // "underwater caustics" GLSL trick) rather than a value-noise field:
-      // value noise is smooth/round by construction, so no amount of
-      // thresholding turns it into anything but soft blobs. This instead
-      // approximates light concentrating along focal lines via 1/distance
-      // singularities, which is what naturally produces thin, sharp,
-      // interconnected bands - tiled and animated fast per uScale/uSpeed.
       void main(void) {
-        vec2 p = mod(vUv * uScale, 1.0) - 0.5;
-        vec2 i = p;
-        float c = 0.0;
-        float inten = 0.06;
-
-        for (int n = 0; n < 5; n++) {
-          float t = uTime * uSpeed * (1.0 - (3.5 / float(n + 1)));
-          i = p + vec2(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x));
-          vec2 d = vec2(p.x / (sin(i.x + t) / inten), p.y / (cos(i.y + t) / inten));
-          c += 1.0 / length(d);
-        }
-        c /= 5.0;
-        c = 1.17 - pow(c, 1.4);
-        float bands = pow(clamp(c, 0.0, 1.0), 8.0);
+        vec2 cuv = vUv * uScale;
+        float ct = uTime * uSpeed;
+        float ca = texture2D(uCausticsMap, cuv + vec2(ct, ct * 0.8)).r;
+        float cb = texture2D(uCausticsMap, cuv * 1.37 + vec2(-ct * 1.1, ct * 0.9)).g;
+        float bands = pow(clamp((ca + cb) * 0.5 * 2.2 - 0.9, 0.0, 1.0), 2.0);
 
         vec3 color = vec3(0.65, 0.85, 1.0) * bands * uIntensity;
         gl_FragColor = vec4(color, bands * uIntensity);
       }
     `,
-    // WGSL twin of the shaders above, so WebGPU (the default renderer) runs
-    // this natively instead of needing a GLSL->WGSL transpiler the engine
-    // package doesn't bundle (glslang/twgsl). Syntax verified against the
-    // engine's own internal shader-desc usage (DebugShader in the bundled
-    // build): `attribute`/`uniform`/`varying name: type;` declarations,
-    // uniforms read back via `uniform.name`, @vertex/@fragment entry points
-    // taking a VertexInput/FragmentInput and returning a VertexOutput/
-    // FragmentOutput whose `.position`/`.color` (plus declared varyings)
-    // the engine wires up automatically.
+    // WGSL twin so WebGPU (the default renderer) runs this natively instead
+    // of needing a GLSL->WGSL transpiler the engine package doesn't bundle.
     vertexWGSL: `
       attribute aPosition: vec3f;
       attribute aUv0: vec2f;
@@ -912,32 +1035,21 @@ function createCausticsQuad() {
     `,
     fragmentWGSL: `
       varying vUv: vec2f;
+      var uCausticsMap: texture_2d<f32>;
+      var uCausticsMapSampler: sampler;
       uniform uTime: f32;
       uniform uScale: f32;
       uniform uSpeed: f32;
       uniform uIntensity: f32;
 
-      fn wgslMod(x: vec2f, y: f32) -> vec2f {
-        return x - y * floor(x / y);
-      }
-
       @fragment fn fragmentMain(input: FragmentInput) -> FragmentOutput {
         var output: FragmentOutput;
 
-        let p = wgslMod(input.vUv * uniform.uScale, 1.0) - vec2f(0.5);
-        var i = p;
-        var c: f32 = 0.0;
-        let inten: f32 = 0.06;
-
-        for (var n: i32 = 0; n < 5; n++) {
-          let t = uniform.uTime * uniform.uSpeed * (1.0 - (3.5 / f32(n + 1)));
-          i = p + vec2f(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x));
-          let d = vec2f(p.x / (sin(i.x + t) / inten), p.y / (cos(i.y + t) / inten));
-          c = c + 1.0 / length(d);
-        }
-        c = c / 5.0;
-        c = 1.17 - pow(c, 1.4);
-        let bands = pow(clamp(c, 0.0, 1.0), 8.0);
+        let cuv = input.vUv * uniform.uScale;
+        let ct = uniform.uTime * uniform.uSpeed;
+        let ca = textureSample(uCausticsMap, uCausticsMapSampler, cuv + vec2f(ct, ct * 0.8)).r;
+        let cb = textureSample(uCausticsMap, uCausticsMapSampler, cuv * 1.37 + vec2f(-ct * 1.1, ct * 0.9)).g;
+        let bands = pow(clamp((ca + cb) * 0.5 * 2.2 - 0.9, 0.0, 1.0), 2.0);
 
         let color = vec3f(0.65, 0.85, 1.0) * bands * uniform.uIntensity;
         output.color = vec4f(color, bands * uniform.uIntensity);
@@ -950,9 +1062,10 @@ function createCausticsQuad() {
   material.cull = CULLFACE_NONE;
   material.depthWrite = false;
   material.setParameter("uTime", 0);
-  material.setParameter("uScale", 14.0);
-  material.setParameter("uSpeed", 1.8);
-  material.setParameter("uIntensity", 0.6);
+  material.setParameter("uScale", 6.0);
+  material.setParameter("uSpeed", 0.06);
+  material.setParameter("uIntensity", 0.5);
+  if (causticsTexture) material.setParameter("uCausticsMap", causticsTexture);
 
   const meshInstance = new MeshInstance(mesh, material);
   const entity = new Entity("Caustics");
@@ -964,6 +1077,8 @@ function createCausticsQuad() {
 }
 
 function positionCausticsForAabb(splat, aabb) {
+  latestSplatForCaustics = splat;
+  latestAabbForCaustics = aabb;
   if (!causticsEntity || !aabb) return;
 
   splat.getWorldTransform().transformPoint(aabb.center, worldAabbCenter);
@@ -988,25 +1103,31 @@ function positionCausticsForAabb(splat, aabb) {
 }
 
 // The caustics shader ships both GLSL and WGSL, so it runs natively on
-// either backend - no renderer switch required. Still wrapped in a
-// try/catch: if something about this specific shader turns out to be
-// unhappy on a given device/browser, the toggle just hides instead of
-// breaking the rest of the viewer.
-try {
-  const created = createCausticsQuad();
-  causticsEntity = created.entity;
-  causticsMaterial = created.material;
-} catch (e) {
-  console.warn("Caustics overlay unavailable:", e);
+// either backend - no renderer switch required. The quad itself is created
+// once the texture asset resolves (see loadCausticsTexture above); this
+// just kicks that load off. Wrapped in a try/catch: if something about this
+// specific shader/texture turns out to be unhappy on a given device/
+// browser, the toggle just hides instead of breaking the rest of the viewer.
+const causticsToggleWrap = document.getElementById("causticsToggleWrap");
+
+function setupCausticsToggle() {
+  if (!causticsToggleWrap) return;
+  if (!causticsEntity) {
+    causticsToggleWrap.style.display = "none";
+    return;
+  }
+  causticsToggleWrap.style.display = "";
+  if (causticsToggle) {
+    causticsToggle.addEventListener("change", () => {
+      if (causticsEntity) causticsEntity.enabled = causticsToggle.checked;
+    });
+  }
 }
 
-const causticsToggleWrap = document.getElementById("causticsToggleWrap");
-if (!causticsEntity) {
-  if (causticsToggleWrap) causticsToggleWrap.style.display = "none";
-} else if (causticsToggle) {
-  causticsToggle.addEventListener("change", () => {
-    if (causticsEntity) causticsEntity.enabled = causticsToggle.checked;
-  });
+try {
+  loadCausticsTexture();
+} catch (e) {
+  console.warn("Caustics overlay unavailable:", e);
 }
 
 // --------------------------------------------------
@@ -1105,8 +1226,10 @@ app.on("update", dt => {
 // gsplat with nothing else to shade.
 // --------------------------------------------------
 
-const FOG_COLOR = [0.02, 0.12, 0.18];
-const FOG_DENSITY = 0.08;
+// Same literal values as the camera's clearColor above - keep them in sync
+// so fully-fogged splats fade into the background instead of a visible seam.
+const FOG_COLOR = [0.035, 0.22, 0.28];
+const FOG_DENSITY = 0.035;
 const camPos = new Vec3();
 let fogSupported = false;
 
@@ -1234,6 +1357,20 @@ select.addEventListener("change", () => {
 });
 
 loadTimepoint(splats[years[0]]);
+
+window.__debug = {
+  getYaw: () => yaw,
+  getPitch: () => pitch,
+  getDistance: () => distance,
+  getTarget: () => target.clone(),
+  getCameraPosition: () => cameraPosition.clone(),
+  hasCaustics: () => !!causticsEntity,
+  hasCausticsTexture: () => !!causticsTexture,
+  isSolidAtWorld: (x, y, z) => {
+    const p = worldToVoxelSpace(new Vec3(x, y, z));
+    return voxelOctree ? voxelOctree.isSolid(p.x, p.y, p.z) : null;
+  }
+};
 
 app.on("update", () => {
   if (!fogSupported) return;
