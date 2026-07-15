@@ -253,8 +253,8 @@ map.on("click", "sites", e => {
   const id = feature.properties.id;
   const name = feature.properties.name;
 
-  // Victory Reef special case
-  if (id === "victoryreef") {
+  // Reefs with a published 3D splat get the 2D/3D choice; others go straight to 2D.
+  if (feature.properties.splats) {
     openViewChoiceModal(id, name);
   } else {
     window.location.href = `viewer.html?id=${id}`;

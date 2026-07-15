@@ -7,53 +7,118 @@
 
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
+  <link rel="stylesheet" href="css/style.css"/>
+
   <style>
     html, body {
       margin: 0;
       padding: 0;
       width: 100%;
       height: 100%;
-      background: black;
       overflow: hidden;
-      font-family: "Courier New", Courier, monospace;
+      background: #000;
     }
 
-    #header {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 10;
-      background: rgba(0,0,0,0.75);
-      padding: 8px 12px;
-      border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.3);
-    }
-
-    #header a {
-      color: white;
-      text-decoration: none;
-    }
-
-    iframe {
-      position: absolute;
-      inset: 0;
+    #app {
+      display: block;
       width: 100%;
       height: 100%;
-      border: none;
+      touch-action: none;
+    }
+
+    /* Caustics toggle (separate from .overlay-toggle so it's always visible
+       here, unlike the 2D viewer's conditionally-shown overlay toggle) */
+    .caustics-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      user-select: none;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .caustics-toggle input {
+      cursor: pointer;
+      transform: translateY(1px);
+    }
+
+    /* Loading overlay */
+    #loader {
+      position: fixed;
+      inset: 0;
+      z-index: 4000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0,0,0,0.92);
+      color: #fff;
+      font-family: "Courier New", Courier, monospace;
+      text-align: center;
+    }
+    #loader[data-hidden="true"] { display: none; }
+    #loader[data-state="error"] #loader-message { color: #ffd2d2; }
+
+    #loader-message {
+      margin-bottom: 12px;
+      font-size: 15px;
+    }
+
+    .loader-progress {
+      width: 240px;
+      height: 4px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px;
+      overflow: hidden;
+      margin: 0 auto;
+    }
+
+    #loader-progress-bar {
+      width: 100%;
+      height: 100%;
+      background: #fff;
+      transform-origin: left center;
+      transform: scaleX(0);
+      transition: transform 0.15s linear;
     }
   </style>
+
+  <script>
+    // Gate: if user didn't come through splash / has no session password, bounce back
+    (function enforcePasswordGate() {
+      const pw = (sessionStorage.getItem("reefshape_password") || "").trim();
+      if (!pw) {
+        window.location.replace("./index.html");
+      }
+    })();
+  </script>
 </head>
 
 <body>
 
-  <div id="header">
-    <a href="index.html">← Back to map</a>
+  <canvas id="app"></canvas>
+
+  <!-- UI Overlay -->
+  <div class="viewer-ui">
+    <a class="back-link" href="./index.html">← Back</a>
+
+    <label for="timepointSelect">Time:</label>
+    <select id="timepointSelect"></select>
+
+    <label class="caustics-toggle" id="causticsToggleWrap">
+      <input type="checkbox" id="causticsToggle" checked>
+      Caustics
+    </label>
   </div>
 
-  <!-- Replace MODEL_ID -->
-  <iframe allow="fullscreen; xr-spatial-tracking" src="https://superspl.at/s?id=20e48446">
-  </iframe>
+  <!-- Loading overlay -->
+  <div id="loader" data-hidden="false">
+    <div>
+      <div id="loader-message">Preparing scene...</div>
+      <div class="loader-progress"><div id="loader-progress-bar"></div></div>
+    </div>
+  </div>
 
+  <!-- Splat viewer logic (PlayCanvas Engine, no build step) -->
+  <script type="module" src="js/splat-viewer.js"></script>
 
 </body>
 </html>
