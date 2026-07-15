@@ -40,6 +40,8 @@ import {
   CULLFACE_NONE,
   DEVICETYPE_WEBGPU,
   DEVICETYPE_WEBGL2,
+  XRTYPE_VR,
+  XRSPACE_LOCALFLOOR,
   createGraphicsDevice
 } from "https://cdn.jsdelivr.net/npm/playcanvas@2.20.0/+esm";
 
@@ -172,8 +174,14 @@ function hideLoader() {
 // PlayCanvas app setup
 // --------------------------------------------------
 
+// The caustics shader is WebGL-only (see below), so let people opt into
+// forcing WebGL2 over WebGPU if they want to see it. Persisted across
+// reloads since switching graphics backends requires a fresh page load.
+const FORCE_WEBGL_KEY = "reefshape_force_webgl";
+const forceWebGL = () => localStorage.getItem(FORCE_WEBGL_KEY) === "1";
+
 const device = await createGraphicsDevice(canvas, {
-  deviceTypes: [DEVICETYPE_WEBGPU, DEVICETYPE_WEBGL2],
+  deviceTypes: forceWebGL() ? [DEVICETYPE_WEBGL2] : [DEVICETYPE_WEBGPU, DEVICETYPE_WEBGL2],
   // Gaussian splats don't benefit from antialiasing and it's expensive.
   antialias: false
 });
@@ -199,12 +207,20 @@ if (app.scene.gsplat) {
   app.scene.gsplat.splatBudget = 3_500_000;
 }
 
+// The camera sits under a "rig" entity: our orbit/pan/zoom/WASD logic moves
+// and orients the rig, while the camera itself stays at local identity. In a
+// WebXR session the engine drives the camera's local position/rotation
+// directly from headset tracking - keeping it as a child means that just
+// works, with the rig acting as the headset's anchor point in the scene.
+const cameraRig = new Entity("CameraRig");
+app.root.addChild(cameraRig);
+
 const camera = new Entity("Camera");
 camera.addComponent("camera", {
   clearColor: new Color(0.02, 0.025, 0.035),
   fov: 75
 });
-app.root.addChild(camera);
+cameraRig.addChild(camera);
 
 // --------------------------------------------------
 // Camera controller
@@ -266,9 +282,17 @@ const updateCameraPosition = () => {
 };
 
 const updateCamera = () => {
-  updateCameraPosition();
-  camera.setPosition(cameraPosition);
-  camera.lookAt(target);
+  // updateBasis() computes cameraPosition plus a {right, up, forward} basis
+  // from yaw/pitch. Passing our own `up` hint to lookAt (rather than letting
+  // it default to world-up) is what matters here: `up` is built as
+  // cross(right, forward), which is mathematically perpendicular to `forward`
+  // at every yaw/pitch - including pitch === 90 (straight down), where world
+  // Y is parallel to `forward` and a lookAt() left to its own default up
+  // vector hits a singularity and flips the whole orientation (and, with it,
+  // whatever movement basis is derived from it that frame).
+  updateBasis();
+  cameraRig.setPosition(cameraPosition);
+  cameraRig.lookAt(target, up);
 };
 
 const getFrameDistance = radius => {
@@ -596,9 +620,16 @@ function positionCausticsForAabb(splat, aabb) {
   const sizeZ = Math.max(aabb.halfExtents.z * 2 * padding, 1);
 
   causticsEntity.setLocalScale(sizeX, 1, sizeZ);
+
+  // Height: use the camera's own focal height/distance rather than the
+  // AABB's Y extent - photogrammetry splats often carry stray outlier
+  // gaussians far above the real reef surface, which inflates
+  // aabb.halfExtents.y well past where the visible content actually sits.
+  // The framed target/distance are a much more reliable stand-in for "just
+  // above the reef" at whatever scale this particular capture uses.
   causticsEntity.setPosition(
     worldAabbCenter.x,
-    worldAabbCenter.y + aabb.halfExtents.y + 0.05,
+    target.y + distance * 0.05,
     worldAabbCenter.z
   );
 }
@@ -624,6 +655,74 @@ if (!causticsSupported || !causticsEntity) {
 } else if (causticsToggle) {
   causticsToggle.addEventListener("change", () => {
     if (causticsEntity) causticsEntity.enabled = causticsToggle.checked;
+  });
+}
+
+// --------------------------------------------------
+// Renderer toggle (WebGPU <-> WebGL2)
+//
+// Switching graphics backends means recreating the whole device, which
+// PlayCanvas doesn't support live - so this just flips a persisted
+// preference and reloads. Mainly useful for seeing caustics, which only
+// render on WebGL2 (see above).
+// --------------------------------------------------
+
+const rendererToggleBtn = document.getElementById("rendererToggle");
+if (rendererToggleBtn) {
+  rendererToggleBtn.textContent = device.isWebGPU ? "Renderer: WebGPU" : "Renderer: WebGL2";
+  rendererToggleBtn.title = device.isWebGPU
+    ? "Switch to WebGL2 to see the caustics effect"
+    : "Switch back to WebGPU (faster, but no caustics)";
+  rendererToggleBtn.addEventListener("click", () => {
+    if (forceWebGL()) {
+      localStorage.removeItem(FORCE_WEBGL_KEY);
+    } else {
+      localStorage.setItem(FORCE_WEBGL_KEY, "1");
+    }
+    window.location.reload();
+  });
+}
+
+// --------------------------------------------------
+// VR (WebXR)
+//
+// Only shown when a headset is actually available. The camera's local
+// position/rotation get overwritten by headset tracking once a session
+// starts - that's exactly why `camera` is a child of `cameraRig` rather
+// than being moved directly: our orbit/pan/WASD logic keeps controlling
+// where the rig stands in the scene, headset tracking handles the rest.
+// --------------------------------------------------
+
+const vrButton = document.getElementById("vrButton");
+
+function updateVrButtonVisibility() {
+  if (!vrButton) return;
+  const available = !!(app.xr && app.xr.supported && app.xr.isAvailable(XRTYPE_VR));
+  vrButton.style.display = available ? "inline-block" : "none";
+}
+
+if (app.xr) {
+  app.xr.on(`available:${XRTYPE_VR}`, updateVrButtonVisibility);
+  app.xr.on("start", () => {
+    if (vrButton) vrButton.textContent = "Exit VR";
+  });
+  app.xr.on("end", () => {
+    if (vrButton) vrButton.textContent = "Enter VR";
+  });
+  app.xr.on("error", error => {
+    console.error("WebXR error:", error);
+    alert("Could not start the VR session.");
+  });
+}
+updateVrButtonVisibility();
+
+if (vrButton) {
+  vrButton.addEventListener("click", () => {
+    if (app.xr.active) {
+      app.xr.end();
+    } else {
+      app.xr.start(camera.camera, XRTYPE_VR, XRSPACE_LOCALFLOOR);
+    }
   });
 }
 
