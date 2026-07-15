@@ -26,21 +26,6 @@
       touch-action: none;
     }
 
-    /* Caustics toggle (separate from .overlay-toggle so it's always visible
-       here, unlike the 2D viewer's conditionally-shown overlay toggle) */
-    .caustics-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      user-select: none;
-      white-space: nowrap;
-      cursor: pointer;
-    }
-    .caustics-toggle input {
-      cursor: pointer;
-      transform: translateY(1px);
-    }
-
     /* Loading overlay */
     #loader {
       position: fixed;
@@ -103,12 +88,6 @@
     <label for="timepointSelect">Time:</label>
     <select id="timepointSelect"></select>
 
-    <label class="caustics-toggle" id="causticsToggleWrap" style="display:none;">
-      <input type="checkbox" id="causticsToggle" checked>
-      Caustics
-    </label>
-
-    <button id="rendererToggle" type="button"></button>
     <button id="vrButton" type="button" style="display:none;">Enter VR</button>
   </div>
 
