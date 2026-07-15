@@ -85,7 +85,8 @@
           "position": [0.7775137424468994, 0.621147871017456, 0.09822270274162292],
           "target": [0, 0, 0],
           "fov": 75
-        }
+        },
+        "voxelCollision": "https://pub-bdf2d3597b1f4cc3ae2811fe08f63330.r2.dev/voxel/scene.voxel"
       },
       "geometry": {
         "type": "Point",

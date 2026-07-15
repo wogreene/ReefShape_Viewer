@@ -128,7 +128,7 @@ if (!featureAllowsAccess(feature.properties, sessionPw)) {
   throw new Error("Access denied");
 }
 
-const { splats, splatPose } = feature.properties;
+const { splats, splatPose, voxelCollision } = feature.properties;
 const years = Object.keys(splats || {}).sort();
 
 if (!years.length) {
@@ -223,10 +223,129 @@ camera.addComponent("camera", {
 cameraRig.addChild(camera);
 
 // --------------------------------------------------
+// Collision voxels
+//
+// A sparse voxel octree (PlayCanvas's own .voxel.json/.bin format, exported
+// alongside the splat from Supersplat) used to stop the camera from flying
+// into the reef geometry. Format spec: developer.playcanvas.com/user-manual/
+// splat-transform/voxel-format/ - each node is one uint32: 0xFF000000 marks
+// a fully-solid leaf, a zero top byte marks a "mixed" leaf (bottom 24 bits
+// index a pair of uint32s in leafData holding a 4x4x4=64-bit occupancy
+// mask), anything else is an interior node (top byte = 8-bit child mask,
+// bottom 24 bits = index of its first present child). Points outside
+// gridBounds count as solid per the spec.
+// --------------------------------------------------
+
+class VoxelOctree {
+  constructor(meta, buffer) {
+    this.gridMin = meta.gridBounds.min;
+    this.gridMax = meta.gridBounds.max;
+    this.voxelResolution = meta.voxelResolution;
+    this.treeDepth = meta.treeDepth;
+    this.rootVoxels = meta.leafSize * (1 << meta.treeDepth);
+    this.nodes = new Uint32Array(buffer, 0, meta.nodeCount);
+    this.leafData = new Uint32Array(buffer, meta.nodeCount * 4, meta.leafDataCount);
+  }
+
+  isSolid(px, py, pz) {
+    const { gridMin, gridMax, voxelResolution, treeDepth, rootVoxels, nodes, leafData } = this;
+
+    if (
+      px < gridMin[0] || px > gridMax[0] ||
+      py < gridMin[1] || py > gridMax[1] ||
+      pz < gridMin[2] || pz > gridMax[2]
+    ) {
+      return true;
+    }
+
+    let vx = (px - gridMin[0]) / voxelResolution;
+    let vy = (py - gridMin[1]) / voxelResolution;
+    let vz = (pz - gridMin[2]) / voxelResolution;
+
+    let nodeIndex = 0;
+    let cubeSize = rootVoxels;
+
+    for (let level = 0; level < treeDepth; level++) {
+      const word = nodes[nodeIndex];
+
+      if (word === 0xff000000) return true;
+      if (word >>> 24 === 0) break; // reached a leaf earlier than expected
+
+      const childMask = word >>> 24;
+      const firstChild = word & 0xffffff;
+      const half = cubeSize / 2;
+
+      const ox = vx >= half ? 1 : 0;
+      const oy = vy >= half ? 1 : 0;
+      const oz = vz >= half ? 1 : 0;
+      const oct = ox | (oy << 1) | (oz << 2);
+
+      if (!(childMask & (1 << oct))) return false;
+
+      let count = 0;
+      for (let b = 0; b < oct; b++) {
+        if (childMask & (1 << b)) count++;
+      }
+      nodeIndex = firstChild + count;
+
+      vx -= ox * half;
+      vy -= oy * half;
+      vz -= oz * half;
+      cubeSize = half;
+    }
+
+    const word = nodes[nodeIndex];
+    if (word === 0xff000000) return true;
+    if (word >>> 24 === 0) {
+      const leafIndex = word & 0xffffff;
+      const lx = Math.min(3, Math.max(0, Math.floor(vx)));
+      const ly = Math.min(3, Math.max(0, Math.floor(vy)));
+      const lz = Math.min(3, Math.max(0, Math.floor(vz)));
+      const bit = lx + (ly << 2) + (lz << 4);
+      return !!(bit < 32 ? (leafData[2 * leafIndex] >>> bit) & 1 : (leafData[2 * leafIndex + 1] >>> (bit - 32)) & 1);
+    }
+
+    return false;
+  }
+}
+
+let voxelOctree = null;
+const voxelQueryPoint = new Vec3();
+
+// The splat entity is rotated 180deg around Z (see loadTimepoint), so its
+// raw/local space - which is what the voxel data was exported in - relates
+// to our world (post-rotation) space by negating X and Y, Z unchanged.
+function worldToVoxelSpace(worldPoint) {
+  voxelQueryPoint.set(-worldPoint.x, -worldPoint.y, worldPoint.z);
+  return voxelQueryPoint;
+}
+
+if (voxelCollision) {
+  (async () => {
+    try {
+      const meta = await fetch(`${voxelCollision}.json`, { cache: "no-store" }).then(r => r.json());
+      const buffer = await fetch(`${voxelCollision}.bin`, { cache: "no-store" }).then(r => r.arrayBuffer());
+      voxelOctree = new VoxelOctree(meta, buffer);
+      // Seed the rollback baseline from wherever the camera already is
+      // (the authored/framed pose) rather than stale defaults, since
+      // collision checking only starts once this promise resolves.
+      lastGoodYaw = yaw;
+      lastGoodPitch = pitch;
+      lastGoodDistance = distance;
+      lastGoodTarget.copy(target);
+    } catch (e) {
+      console.warn("Collision voxels unavailable:", e);
+    }
+  })();
+}
+
+// --------------------------------------------------
 // Camera controller
-//   - drag to orbit, right-drag / shift+wheel to pan, wheel to zoom
+//   - left-drag / one-finger touch-drag pans horizontally, same as WASD/arrows
+//   - right-drag / two-finger touch-drag tilts (orbit)
+//   - wheel zooms; pinch (two-finger, distance changing) zooms on touch
 //   - WASD/arrows glide horizontally across the reef (no vertical dolly)
-//   - pitch clamped to [45, 90] (90 = straight down) so the view stays
+//   - pitch clamped to [30, 90] (90 = straight down) so the view stays
 //     primarily top-down instead of tilting toward the horizon
 // --------------------------------------------------
 
@@ -238,7 +357,7 @@ const FLY_MOVE_ACCELERATION_DAMPING = 0.992;
 const FLY_MOVE_DECELERATION_DAMPING = 0.993;
 const WHEEL_ZOOM_SPEED = 0.06 / 60;
 const PINCH_ZOOM_SPEED = WHEEL_ZOOM_SPEED * 2;
-const MIN_PITCH = 45; // can't tilt further toward the horizon than this
+const MIN_PITCH = 30; // can't tilt further toward the horizon than this
 const MAX_PITCH = 90; // straight down
 const MIN_SCENE_RADIUS = 0.5;
 
@@ -260,12 +379,28 @@ let pitch = MAX_PITCH;
 let distance = 3;
 let fov = DEFAULT_FOV;
 let sceneRadius = 1;
-let dragMode = null;
-let activePointerId = null;
-let lastPointerX = 0;
-let lastPointerY = 0;
 let isControlKeyDown = false;
 let hasLoadedOnce = false;
+
+// Last camera state that passed the collision check - rolled back to
+// whenever a move would put the eye inside solid voxels, so blocked moves
+// just don't happen rather than needing per-input-handler special casing.
+let lastGoodYaw = yaw;
+let lastGoodPitch = pitch;
+let lastGoodDistance = distance;
+const lastGoodTarget = new Vec3();
+
+// Pointer/touch state. Every active pointer (mouse button held, or finger
+// down) is tracked by id so we can tell a one-finger touch (pan) from a
+// two-finger touch (orbit + pinch-zoom combined, like a map app) apart from
+// mouse input (button decides pan vs orbit; there's never more than one).
+const activePointers = new Map(); // pointerId -> {x, y}
+let dragMode = null; // "pan" | "orbit" | "touch2" | null
+let lastPointerX = 0;
+let lastPointerY = 0;
+let touchCenterX = 0;
+let touchCenterY = 0;
+let pinchDist = 0;
 
 const clampPitch = p => Math.max(MIN_PITCH, Math.min(MAX_PITCH, p));
 
@@ -291,6 +426,28 @@ const updateCamera = () => {
   // vector hits a singularity and flips the whole orientation (and, with it,
   // whatever movement basis is derived from it that frame).
   updateBasis();
+
+  // Collision: if the eye would end up inside solid voxels, roll yaw/pitch/
+  // distance/target back to the last position that was clear instead of
+  // moving there. No per-input special-casing needed - every pan/orbit/zoom/
+  // WASD update funnels through here. Fails open (no blocking) until the
+  // voxel data has loaded, or if this reef has none.
+  if (voxelOctree) {
+    const p = worldToVoxelSpace(cameraPosition);
+    if (voxelOctree.isSolid(p.x, p.y, p.z)) {
+      yaw = lastGoodYaw;
+      pitch = lastGoodPitch;
+      distance = lastGoodDistance;
+      target.copy(lastGoodTarget);
+      updateBasis();
+    } else {
+      lastGoodYaw = yaw;
+      lastGoodPitch = pitch;
+      lastGoodDistance = distance;
+      lastGoodTarget.copy(target);
+    }
+  }
+
   cameraRig.setPosition(cameraPosition);
   cameraRig.lookAt(target, up);
 };
@@ -301,7 +458,7 @@ const getFrameDistance = radius => {
 };
 
 const clampDistance = value => {
-  const minDistance = Math.max(sceneRadius * 0.02, 0.02);
+  const minDistance = Math.max(sceneRadius * 0.008, 0.008);
   const maxDistance = Math.max(sceneRadius * 40, 30);
   return Math.max(minDistance, Math.min(maxDistance, value));
 };
@@ -380,7 +537,11 @@ const updateBasis = () => {
   }
 };
 
-const panTarget = (deltaX, deltaY) => {
+// Horizontal pan driven by a drag delta - same {right, flatForward} basis
+// WASD/arrows use, so a left-drag (or one-finger touch-drag) feels like the
+// same "glide across the reef" motion, just under direct pointer control
+// instead of key-hold + damping.
+const panHorizontal = (deltaX, deltaY) => {
   updateBasis();
 
   const height = canvas.clientHeight || window.innerHeight;
@@ -391,24 +552,82 @@ const panTarget = (deltaX, deltaY) => {
   nextTarget
     .copy(right)
     .mulScalar((-deltaX / width) * halfWidth * 2)
-    .add(up.clone().mulScalar((deltaY / height) * halfHeight * 2));
+    .add(flatForward.clone().mulScalar((deltaY / height) * halfHeight * 2));
 
   target.add(nextTarget);
   updateCamera();
 };
 
-canvas.addEventListener("pointerdown", event => {
-  if (activePointerId !== null) return;
+const orbitDrag = (deltaX, deltaY) => {
+  yaw -= deltaX * ORBIT_SENSITIVITY;
+  pitch = clampPitch(pitch + deltaY * ORBIT_SENSITIVITY);
+  updateCamera();
+};
 
-  dragMode = event.button === 2 ? "pan" : "orbit";
-  activePointerId = event.pointerId;
-  lastPointerX = event.clientX;
-  lastPointerY = event.clientY;
-  canvas.setPointerCapture(event.pointerId);
+function touchCenterAndDist() {
+  const [a, b] = Array.from(activePointers.values());
+  return {
+    cx: (a.x + b.x) / 2,
+    cy: (a.y + b.y) / 2,
+    dist: Math.hypot(a.x - b.x, a.y - b.y)
+  };
+}
+
+canvas.addEventListener("pointerdown", event => {
+  activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  try {
+    canvas.setPointerCapture(event.pointerId);
+  } catch (e) {
+    // Ignore - capture can fail for synthetic/replayed pointer ids; the
+    // gesture still works via our own activePointers tracking below.
+  }
+
+  if (event.pointerType === "touch") {
+    if (activePointers.size === 1) {
+      dragMode = "pan";
+      lastPointerX = event.clientX;
+      lastPointerY = event.clientY;
+    } else if (activePointers.size === 2) {
+      dragMode = "touch2";
+      const { cx, cy, dist } = touchCenterAndDist();
+      touchCenterX = cx;
+      touchCenterY = cy;
+      pinchDist = dist;
+    }
+    // A third+ finger is ignored - keep whatever gesture was already active.
+  } else if (activePointers.size === 1) {
+    // Mouse (or pen): left button pans, right button orbits.
+    dragMode = event.button === 2 ? "orbit" : "pan";
+    lastPointerX = event.clientX;
+    lastPointerY = event.clientY;
+  }
 });
 
 canvas.addEventListener("pointermove", event => {
-  if (activePointerId !== event.pointerId || !dragMode) return;
+  if (!activePointers.has(event.pointerId)) return;
+  activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+  if (dragMode === "touch2") {
+    if (activePointers.size !== 2) return;
+
+    const { cx, cy, dist } = touchCenterAndDist();
+
+    // Two fingers moving together => orbit (mirrors right-click-drag).
+    orbitDrag(cx - touchCenterX, cy - touchCenterY);
+
+    // Fingers moving apart/together => pinch-zoom.
+    if (pinchDist > 0) {
+      distance = clampDistance(distance * (pinchDist / dist));
+      updateCamera();
+    }
+
+    touchCenterX = cx;
+    touchCenterY = cy;
+    pinchDist = dist;
+    return;
+  }
+
+  if (!dragMode) return;
 
   const deltaX = event.clientX - lastPointerX;
   const deltaY = event.clientY - lastPointerY;
@@ -416,22 +635,28 @@ canvas.addEventListener("pointermove", event => {
   lastPointerY = event.clientY;
 
   if (dragMode === "pan") {
-    panTarget(deltaX, deltaY);
-  } else {
-    yaw -= deltaX * ORBIT_SENSITIVITY;
-    pitch = clampPitch(pitch + deltaY * ORBIT_SENSITIVITY);
-    updateCamera();
+    panHorizontal(deltaX, deltaY);
+  } else if (dragMode === "orbit") {
+    orbitDrag(deltaX, deltaY);
   }
 });
 
 const endPointerDrag = event => {
-  if (activePointerId !== event.pointerId) return;
-
-  dragMode = null;
-  activePointerId = null;
+  activePointers.delete(event.pointerId);
 
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
+  }
+
+  if (activePointers.size === 0) {
+    dragMode = null;
+  } else if (activePointers.size === 1) {
+    // Dropped from two touches to one - resume single-finger pan with
+    // whichever finger is still down, instead of ending the gesture.
+    const [pos] = Array.from(activePointers.values());
+    dragMode = "pan";
+    lastPointerX = pos.x;
+    lastPointerY = pos.y;
   }
 };
 
@@ -445,7 +670,7 @@ canvas.addEventListener(
     event.preventDefault();
 
     if (event.shiftKey) {
-      panTarget(event.deltaX, event.deltaY);
+      panHorizontal(event.deltaX, event.deltaY);
       return;
     }
 
@@ -575,19 +800,32 @@ function createCausticsQuad() {
       varying vec2 vUv;
       uniform float uTime;
       uniform float uScale;
+      uniform float uSpeed;
       uniform float uIntensity;
 
-      float bandLayer(vec2 uv, float t) {
-        vec2 p = uv * uScale;
-        float a = sin(p.x * 1.7 + t * 0.6) + sin(p.y * 1.3 - t * 0.5);
-        float b = sin((p.x + p.y) * 1.1 - t * 0.8) + sin((p.x - p.y) * 1.9 + t * 0.4);
-        return a + b;
-      }
-
+      // A raymarched-looking 2D interference pattern (the classic real-time
+      // "underwater caustics" GLSL trick) rather than a value-noise field:
+      // value noise is smooth/round by construction, so no amount of
+      // thresholding turns it into anything but soft blobs. This instead
+      // approximates light concentrating along focal lines via 1/distance
+      // singularities, which is what naturally produces thin, sharp,
+      // interconnected bands - tiled and animated fast per uScale/uSpeed.
       void main(void) {
-        float n1 = bandLayer(vUv, uTime);
-        float n2 = bandLayer(vUv * 1.37 + 5.2, -uTime * 0.8);
-        float bands = pow(max(0.0, (n1 * n2) * 0.25 + 0.5), 6.0);
+        vec2 p = mod(vUv * uScale, 1.0) - 0.5;
+        vec2 i = p;
+        float c = 0.0;
+        float inten = 0.06;
+
+        for (int n = 0; n < 5; n++) {
+          float t = uTime * uSpeed * (1.0 - (3.5 / float(n + 1)));
+          i = p + vec2(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x));
+          vec2 d = vec2(p.x / (sin(i.x + t) / inten), p.y / (cos(i.y + t) / inten));
+          c += 1.0 / length(d);
+        }
+        c /= 5.0;
+        c = 1.17 - pow(c, 1.4);
+        float bands = pow(clamp(c, 0.0, 1.0), 8.0);
+
         vec3 color = vec3(0.65, 0.85, 1.0) * bands * uIntensity;
         gl_FragColor = vec4(color, bands * uIntensity);
       }
@@ -598,8 +836,9 @@ function createCausticsQuad() {
   material.cull = CULLFACE_NONE;
   material.depthWrite = false;
   material.setParameter("uTime", 0);
-  material.setParameter("uScale", 6.0);
-  material.setParameter("uIntensity", 0.35);
+  material.setParameter("uScale", 14.0);
+  material.setParameter("uSpeed", 1.8);
+  material.setParameter("uIntensity", 0.6);
 
   const meshInstance = new MeshInstance(mesh, material);
   const entity = new Entity("Caustics");
@@ -740,6 +979,77 @@ app.on("update", dt => {
 // It's only reset (via applyCameraPose/frameSplat) on the very first load.
 // --------------------------------------------------
 
+// --------------------------------------------------
+// Distance-based underwater fog
+//
+// Tints each splat's color toward a fog color based on its distance from
+// the camera - the classic exponential light-attenuation-through-water
+// look. Implemented via the engine's gsplatModifyVS shader chunk override
+// on the scene-wide *unified* gsplat material (app.scene.gsplat.material -
+// see the "unified: true" component option in loadTimepoint below), the
+// same technique PlayCanvas's own underwater water script uses for lit
+// materials via litUserMainEndPS (engine PR #9029, scripts/esm/water.mjs),
+// just applied per-splat instead of per-lit-pixel since our scene is 100%
+// gsplat with nothing else to shade.
+// --------------------------------------------------
+
+const FOG_COLOR = [0.02, 0.12, 0.18];
+const FOG_DENSITY = 0.08;
+const camPos = new Vec3();
+let fogSupported = false;
+
+function setupUnderwaterFog() {
+  try {
+    const gsplatMat = app.scene.gsplat.material;
+
+    gsplatMat.getShaderChunks("glsl").set(
+      "gsplatModifyVS",
+      `
+        uniform vec3 uCamPos;
+        uniform vec3 uFogColor;
+        uniform float uFogDensity;
+
+        void modifySplatCenter(inout vec3 center) {
+        }
+        void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
+        }
+        void modifySplatColor(vec3 center, inout vec4 color) {
+          float dist = length(center - uCamPos);
+          float fogFactor = clamp(exp(-uFogDensity * dist), 0.0, 1.0);
+          color.rgb = mix(uFogColor, color.rgb, fogFactor);
+        }
+      `
+    );
+
+    gsplatMat.getShaderChunks("wgsl").set(
+      "gsplatModifyVS",
+      `
+        uniform uCamPos : vec3f;
+        uniform uFogColor : vec3f;
+        uniform uFogDensity : f32;
+
+        fn modifySplatCenter(center: ptr<function, vec3f>) {
+        }
+        fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
+        }
+        fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+          let dist: f32 = length(center - uniform.uCamPos);
+          let fogFactor: f32 = clamp(exp(-uniform.uFogDensity * dist), 0.0, 1.0);
+          (*color) = vec4f(mix(uniform.uFogColor, (*color).rgb, fogFactor), (*color).a);
+        }
+      `
+    );
+
+    gsplatMat.setParameter("uFogColor", FOG_COLOR);
+    gsplatMat.setParameter("uFogDensity", FOG_DENSITY);
+    gsplatMat.update();
+
+    fogSupported = true;
+  } catch (e) {
+    console.warn("Underwater fog unavailable:", e);
+  }
+}
+
 let currentSplatEntity = null;
 let currentSplatAsset = null;
 
@@ -765,7 +1075,10 @@ function loadTimepoint(url) {
   asset.on("load", () => {
     const splat = new Entity("Splat");
     splat.setLocalEulerAngles(0, 0, 180);
-    splat.addComponent("gsplat", { asset });
+    // unified: true puts this (and every other) splat on the scene-wide
+    // app.scene.gsplat.material, which is what the fog shader override below
+    // hooks into - it only has to be set up once, not reapplied per entity.
+    splat.addComponent("gsplat", { asset, unified: true });
     app.root.addChild(splat);
 
     const previousEntity = currentSplatEntity;
@@ -783,6 +1096,7 @@ function loadTimepoint(url) {
 
     if (!hasLoadedOnce) {
       hasLoadedOnce = true;
+      setupUnderwaterFog();
       if (!splatPose || !applyCameraPose(splatPose)) {
         frameSplat(splat, aabb);
       }
@@ -808,3 +1122,15 @@ select.addEventListener("change", () => {
 });
 
 loadTimepoint(splats[years[0]]);
+
+app.on("update", () => {
+  if (!fogSupported) return;
+  try {
+    camPos.copy(cameraRig.getPosition());
+    app.scene.gsplat.material.setParameter("uCamPos", [camPos.x, camPos.y, camPos.z]);
+    app.scene.gsplat.material.update();
+  } catch (e) {
+    console.warn("Underwater fog update failed:", e);
+    fogSupported = false;
+  }
+});
