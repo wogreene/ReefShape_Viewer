@@ -874,12 +874,26 @@ function planarPanDrag(deltaX, deltaY) {
 const picker = new Picker(app, canvas.clientWidth || 1, canvas.clientHeight || 1, true);
 const clickOffset = new Vec3();
 
+// Fraction of the view's vertical extent the ring's scale factor should
+// span, so it reads as a constant on-screen size regardless of zoom level.
+const MARKER_SCREEN_FRACTION = 0.035;
+
 function showClickMarker(worldPoint) {
-  // Sized off the current zoom depth, not the whole scene's fixed radius -
-  // otherwise the ring reads as tiny when zoomed out to frame the whole reef
-  // and comically oversized once zoomed in on a single coral head.
-  const referenceScale = is2DMode ? orthoHeight : currentViewDistance();
-  const size = Math.max(referenceScale * 0.05, 0.001);
+  // True fixed-screenspace sizing: derive the world-space scale that
+  // produces a constant apparent size, from the actual distance to the
+  // clicked point and the camera's current FOV (or orthoHeight in 2D,
+  // where apparent size is distance-independent). currentViewDistance()
+  // was the wrong basis for this - immediately after a click it collapses
+  // to pose.distance (camera-to-focus, at that instant equal to the click
+  // distance by construction - see clickToCenter), which has nothing to do
+  // with the actual current zoom depth, making the ring's size look
+  // arbitrary right when it's shown.
+  const size = Math.max(
+    is2DMode
+      ? orthoHeight * 2 * MARKER_SCREEN_FRACTION
+      : pose.position.distance(worldPoint) * 2 * Math.tan((fov * Math.PI) / 360) * MARKER_SCREEN_FRACTION,
+    0.0001
+  );
   clickMarker.setPosition(worldPoint);
   clickMarker.setLocalScale(size, size, size);
   clickMarker.enabled = true;
