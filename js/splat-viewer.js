@@ -35,6 +35,7 @@ import {
   XRSPACE_LOCALFLOOR,
   PROJECTION_ORTHOGRAPHIC,
   PROJECTION_PERSPECTIVE,
+  StandardMaterial,
   createGraphicsDevice
 } from "https://cdn.jsdelivr.net/npm/playcanvas@2.20.0/+esm";
 
@@ -212,6 +213,25 @@ camera.addComponent("camera", {
 });
 cameraRig.addChild(camera);
 
+// Click-to-center marker: a flat glowing ring dropped at wherever the last
+// click/tap actually landed on the reef (see clickToCenter below). Emissive-
+// only material since this scene has no light components registered - an
+// ordinary lit material would render solid black without one.
+const clickMarker = new Entity("ClickMarker");
+clickMarker.addComponent("render", { type: "torus", castShadows: false, receiveShadows: false });
+app.root.addChild(clickMarker);
+clickMarker.enabled = false;
+if (clickMarker.render) {
+  const clickMarkerMaterial = new StandardMaterial();
+  clickMarkerMaterial.emissive = new Color(1, 0.9, 0.3);
+  clickMarkerMaterial.diffuse = new Color(0, 0, 0);
+  clickMarkerMaterial.update();
+  clickMarker.render.meshInstances.forEach(mi => {
+    mi.material = clickMarkerMaterial;
+  });
+}
+let clickMarkerHideTimer = null;
+
 // --------------------------------------------------
 // Collision voxels
 //
@@ -322,10 +342,18 @@ function worldToVoxelSpace(worldPoint) {
   return voxelQueryPoint;
 }
 
-function isBlockedAt(position) {
-  if (!ENABLE_VOXEL_COLLISION || !voxelOctree) return false;
+// Raw occupancy query, independent of ENABLE_VOXEL_COLLISION - used both for
+// movement collision (isBlockedAt, which does respect that flag) and for
+// click-to-center's raycast below, which needs real hit-testing regardless
+// of whether collision is currently enforced.
+function isSolidAt(position) {
+  if (!voxelOctree) return false;
   const p = worldToVoxelSpace(position);
   return voxelOctree.isSolid(p.x, p.y, p.z);
+}
+
+function isBlockedAt(position) {
+  return ENABLE_VOXEL_COLLISION && isSolidAt(position);
 }
 
 if (voxelCollision) {
@@ -649,6 +677,16 @@ function enter2DMode() {
     camera.camera.projection = PROJECTION_ORTHOGRAPHIC;
     camera.camera.orthoHeight = orthoHeight;
   }
+
+  // The underwater fog tint is distance-from-camera based (see
+  // setupUnderwaterFog below), and 2D mode's camera sits far enough above
+  // the reef to frame the whole scene that everything reads as uniformly
+  // fogged - fine for an immersive perspective view, wrong for a flat
+  // photomosaic that's supposed to look like an evenly-exposed orthophoto.
+  if (fogSupported) {
+    app.scene.gsplat.material.setParameter("uFogDensity", 0);
+    app.scene.gsplat.material.update();
+  }
 }
 
 function exit2DMode() {
@@ -660,6 +698,11 @@ function exit2DMode() {
   if (camera.camera) {
     camera.camera.projection = PROJECTION_PERSPECTIVE;
     camera.camera.fov = fov;
+  }
+
+  if (fogSupported) {
+    app.scene.gsplat.material.setParameter("uFogDensity", FOG_DENSITY);
+    app.scene.gsplat.material.update();
   }
 }
 
@@ -753,6 +796,89 @@ function planarPanDrag(deltaX, deltaY) {
   translateCamera(panDelta);
 }
 
+// Click-to-center: recenters the view on wherever was clicked, without
+// changing the current viewing angle/zoom. This is the main way to recover
+// when free-roaming (WASD/Q-E/dolly/pan, especially on mobile where drift is
+// easy to rack up without noticing) has left the camera position and
+// zoomTarget far apart or otherwise "out of range" - click a point on the
+// reef and both snap back into a sane relationship, anchored on real
+// geometry instead of empty space.
+const rayNear = new Vec3();
+const rayFar = new Vec3();
+const rayDir = new Vec3();
+const rayStep = new Vec3();
+const clickOffset = new Vec3();
+
+// Marches a ray through the voxel data in fixed steps looking for the first
+// solid hit - the actual reef surface, not a guessed/fixed elevation. This
+// is why the marker (and the recenter target) can sit right on the coral
+// instead of floating at some assumed flat height above it.
+function raycastVoxels(origin, direction, maxDistance) {
+  if (!voxelOctree) return null;
+  const stepSize = Math.max(voxelOctree.voxelResolution * 2, 0.01);
+  const steps = Math.floor(maxDistance / stepSize);
+  for (let i = 1; i <= steps; i++) {
+    rayStep.copy(origin).addScaled(direction, i * stepSize);
+    if (isSolidAt(rayStep)) return rayStep.clone();
+  }
+  return null;
+}
+
+// Fallback for when there's no voxel data (or the click missed all of it,
+// e.g. a click out into open water) - intersect a horizontal plane at the
+// current zoomTarget height rather than doing nothing.
+function intersectGroundPlane(origin, direction, planeY) {
+  if (Math.abs(direction.y) < 1e-6) return null;
+  const t = (planeY - origin.y) / direction.y;
+  if (t <= 0) return null;
+  return new Vec3().copy(origin).addScaled(direction, t);
+}
+
+function showClickMarker(worldPoint) {
+  // Sized off the current zoom depth, not the whole scene's fixed radius -
+  // otherwise the ring reads as tiny when zoomed out to frame the whole reef
+  // and comically oversized once zoomed in on a single coral head.
+  const referenceScale = is2DMode ? orthoHeight : currentViewDistance();
+  const size = Math.max(referenceScale * 0.05, 0.001);
+  clickMarker.setPosition(worldPoint);
+  clickMarker.setLocalScale(size, size, size);
+  clickMarker.enabled = true;
+
+  clearTimeout(clickMarkerHideTimer);
+  clickMarkerHideTimer = setTimeout(() => {
+    clickMarker.enabled = false;
+  }, 900);
+}
+
+function clickToCenter(screenX, screenY) {
+  if (!camera.camera) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = app.graphicsDevice.width / rect.width;
+  const scaleY = app.graphicsDevice.height / rect.height;
+  const x = (screenX - rect.left) * scaleX;
+  const y = (screenY - rect.top) * scaleY;
+
+  camera.camera.screenToWorld(x, y, camera.camera.nearClip, rayNear);
+  camera.camera.screenToWorld(x, y, camera.camera.farClip, rayFar);
+  rayDir.copy(rayFar).sub(rayNear).normalize();
+
+  const hitPoint = raycastVoxels(rayNear, rayDir, maxZoomDistance) ||
+    intersectGroundPlane(rayNear, rayDir, zoomTarget.y);
+  if (!hitPoint) return;
+
+  clickOffset.copy(hitPoint).sub(zoomTarget);
+  // 2D mode's camera height is fixed by design (see enter2DMode) - only
+  // recenter horizontally there, don't let a click on sloped terrain lift
+  // the camera off its pinned height.
+  if (is2DMode) clickOffset.y = 0;
+
+  translateCamera(clickOffset, { skipCollision: true });
+  zoomTarget.add(clickOffset);
+
+  showClickMarker(hitPoint);
+}
+
 function touchCenterAndDist(activePointers) {
   const [a, b] = Array.from(activePointers.values());
   return {
@@ -774,6 +900,15 @@ let touchCenterX = 0;
 let touchCenterY = 0;
 let pinchDist = 0;
 
+// Tracks whether the current single-pointer gesture is still a plain click/
+// tap (as opposed to having turned into a pan drag) - cancelled the moment
+// it moves more than CLICK_MOVE_THRESHOLD px, so an ordinary pan never also
+// triggers a recenter.
+const CLICK_MOVE_THRESHOLD = 6;
+let clickCandidateActive = false;
+let clickCandidateX = 0;
+let clickCandidateY = 0;
+
 canvas.addEventListener("pointerdown", event => {
   activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   try {
@@ -788,12 +923,16 @@ canvas.addEventListener("pointerdown", event => {
       dragMode = "pan";
       lastPointerX = event.clientX;
       lastPointerY = event.clientY;
+      clickCandidateActive = true;
+      clickCandidateX = event.clientX;
+      clickCandidateY = event.clientY;
     } else if (activePointers.size === 2) {
       dragMode = "touch2";
       const { cx, cy, dist } = touchCenterAndDist(activePointers);
       touchCenterX = cx;
       touchCenterY = cy;
       pinchDist = dist;
+      clickCandidateActive = false; // a second finger joined - no longer a simple tap
     }
     // A third+ finger is ignored - keep whatever gesture was already active.
   } else if (activePointers.size === 1) {
@@ -801,12 +940,20 @@ canvas.addEventListener("pointerdown", event => {
     dragMode = event.button === 2 ? "orbit" : "pan";
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
+    clickCandidateActive = event.button !== 2;
+    clickCandidateX = event.clientX;
+    clickCandidateY = event.clientY;
   }
 });
 
 canvas.addEventListener("pointermove", event => {
   if (!activePointers.has(event.pointerId)) return;
   activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+  if (clickCandidateActive) {
+    const movedDist = Math.hypot(event.clientX - clickCandidateX, event.clientY - clickCandidateY);
+    if (movedDist > CLICK_MOVE_THRESHOLD) clickCandidateActive = false;
+  }
 
   if (dragMode === "touch2") {
     if (activePointers.size !== 2) return;
@@ -847,11 +994,20 @@ canvas.addEventListener("pointermove", event => {
 });
 
 const endPointerDrag = event => {
+  // Whether this is the last pointer lifting off (ending the whole gesture,
+  // as opposed to dropping from two touches to one) has to be checked
+  // before deleting it below.
+  const isLastPointer = activePointers.size === 1;
   activePointers.delete(event.pointerId);
 
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
   }
+
+  if (event.type === "pointerup" && isLastPointer && clickCandidateActive) {
+    clickToCenter(event.clientX, event.clientY);
+  }
+  clickCandidateActive = false;
 
   if (activePointers.size === 0) {
     dragMode = null;
@@ -1195,10 +1351,7 @@ window.__debug = {
   getViewDistance: () => currentViewDistance(),
   getTarget: () => pose.getFocus(new Vec3()),
   getCameraPosition: () => pose.position.clone(),
-  isSolidAtWorld: (x, y, z) => {
-    const p = worldToVoxelSpace(new Vec3(x, y, z));
-    return voxelOctree ? voxelOctree.isSolid(p.x, p.y, p.z) : null;
-  },
+  isSolidAtWorld: (x, y, z) => (voxelOctree ? isSolidAt(new Vec3(x, y, z)) : null),
   is2DMode: () => is2DMode,
   getOrthoHeight: () => orthoHeight,
   getProjection: () => camera.camera && camera.camera.projection
