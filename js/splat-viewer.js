@@ -303,15 +303,11 @@ class VoxelOctree {
   }
 }
 
-// Collision enforcement was disabled for a while - before the camera could
-// dolly through full 3D space (see dollyCamera below), collision was the
-// only thing standing between "zoom" and just phasing through the reef, and
-// the two fought each other more than they helped. Now that zoom is a real
-// translation instead of a distance-to-a-fixed-point shrink, collision goes
-// back to its actual job: stopping the camera from flying into solid reef
-// while dollying, panning, strafing, or moving vertically (see
-// translateCamera's use of isBlockedAt below).
-const ENABLE_VOXEL_COLLISION = true;
+// Collision enforcement is disabled for now - some "solid" voxels appear to
+// be the edge of the scanned area rather than real reef, blocking the camera
+// well before it reaches actual coral. Revisit once that's sorted out (see
+// translateCamera's use of isBlockedAt below for where it plugs back in).
+const ENABLE_VOXEL_COLLISION = false;
 
 let voxelOctree = null;
 const voxelQueryPoint = new Vec3();
