@@ -337,30 +337,40 @@ if (voxelCollision) {
 // fully hand-rolled camera. A hand-rolled version of this (tracking yaw/
 // pitch/distance/target as plain numbers, applying orientation via
 // lookAt()) went through several rounds of bugs: gimbal lock at straight-
-// down pitch, pan/zoom math that silently stopped scaling correctly at
-// close zoom, and a click-to-focus feature that only ever turned the
-// camera instead of moving it. PlayCanvas's own primitives (used in the
-// engine's own orbit-camera example) avoid those problems structurally:
-//   - Pose applies orientation via setEulerAngles(), not lookAt(), so there's
-//     no gimbal-lock singularity at pitch=90 (straight down) to guard against.
-//   - OrbitController's zoom/orbit math is anchored to the camera's own
-//     current distance, not an external reference height, so it can't drift
-//     out of scale the way the hand-rolled version did.
+// down pitch, and a click-to-focus feature that only ever turned the
+// camera instead of moving it. Pose's setEulerAngles()-based orientation
+// (instead of lookAt()) avoids the gimbal-lock singularity at pitch=90
+// (straight down) structurally, with no up-vector hack needed.
 //
-// Two things are still hand-rolled here, because they're specific
+// OrbitController is only used for its rotate (orbit) handling now - zoom
+// is a hand-rolled forward/backward dolly through full 3D space (see
+// dollyCamera below) rather than OrbitController's built-in "shrink the
+// distance to a fixed orbit target" zoom. That distance-shrink approach
+// only ever gets the camera closer to *the orbit target's height* - fine
+// for a flat reef, but reefs with real topography don't have one flat
+// "bottom" for the target to sit at, so zooming in on a coral head at a
+// different height than the target would stall well short of it. Dollying
+// through space instead means the camera can freely ascend/descend to
+// follow whatever it's actually pointed at - the same way a diver swims
+// toward a subject rather than orbiting a fixed point above the reef.
+//
+// WASD/arrows and left-drag are hand-rolled too, because they're specific
 // requirements for this project rather than generic orbit-camera behavior:
-//   - WASD/arrows AND left-drag both move the camera across the *flat*
-//     horizontal plane (ignoring pitch tilt), rather than PlayCanvas's
-//     built-in view-plane pan - this project wants both to feel like
-//     "planar" movement across the reef surface, driven by key state for
-//     WASD and directly by drag distance for the mouse/touch version.
-//   - the pitch clamp's default range (30-90 degrees, 90 = straight down)
-//     instead of OrbitController's default of unrestricted.
+// both move the camera across the *flat* horizontal plane (ignoring pitch
+// tilt), driven by key state for WASD and directly by drag distance for
+// the mouse/touch version, so lateral movement always glides across the
+// reef surface instead of dollying toward/away from it. Vertical movement
+// is zoom's job (see above), keeping the two controls from fighting each
+// other.
+//
+// The pitch clamp's default range (30-90 degrees, 90 = straight down) is
+// also project-specific, set via OrbitController's pitchRange rather than
+// its default of unrestricted.
 //
 // Button mapping:
 //   - left-drag / one-finger touch-drag = planar pan
 //   - right-drag / two-finger touch-drag = orbit (tilt/rotate)
-//   - wheel / pinch = zoom
+//   - wheel / pinch = zoom (forward/backward dolly, full 3D)
 // --------------------------------------------------
 
 const DEFAULT_FOV = 75;
@@ -537,8 +547,39 @@ function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {
   inputFrame.deltas.rotate.append([yawDeltaDeg, pitchDeltaDeg, 0]);
 }
 
-function appendZoom(fractionalDelta) {
-  inputFrame.deltas.move.append([0, 0, fractionalDelta]);
+// Full (non-flattened) view-direction vector, derived from the current pose
+// angles - unlike flatForward (used for WASD/pan, which stay intentionally
+// horizontal), this includes the vertical component of where the camera is
+// actually looking.
+const viewForward = new Vec3();
+function updateViewForward() {
+  const yawRad = (pose.angles.y * Math.PI) / 180;
+  const pitchRad = (-pose.angles.x * Math.PI) / 180;
+  const cosPitch = Math.cos(pitchRad);
+  viewForward.set(-Math.sin(yawRad) * cosPitch, -Math.sin(pitchRad), -Math.cos(yawRad) * cosPitch);
+}
+
+// Zoom is a true forward/backward dolly through full 3D space - translating
+// the camera (and the point it orbits around, by the same amount - see
+// translateCamera) along the direction it's actually looking, rather than
+// shrinking a "distance to a fixed orbit target" that only ever gets you
+// closer to wherever that target height happens to be. A reef with real
+// topography doesn't have one flat "bottom" the orbit target can sit at, so
+// the old distance-shrink approach could only ever get close to *a* height,
+// not necessarily the one you're actually looking at - dollying through
+// space instead means you can descend/ascend to follow the terrain, the
+// same way a diver swims toward whatever they're looking at rather than
+// orbiting a fixed point above the reef.
+//
+// Scaled by the current distance (same as the old distance-shrink formula)
+// so it still feels proportional - fast when far out, fine control up
+// close - even though it's now an absolute translation instead of a
+// multiplicative shrink.
+const dollyDelta = new Vec3();
+function dollyCamera(amount) {
+  updateViewForward();
+  dollyDelta.copy(viewForward).mulScalar(amount);
+  translateCamera(dollyDelta);
 }
 
 // "Grab and drag" planar pan: the point on the flat plane under the cursor
@@ -624,9 +665,9 @@ canvas.addEventListener("pointermove", event => {
     // Two fingers moving together => orbit (mirrors right-click-drag).
     appendOrbitRotate((cx - touchCenterX) * ORBIT_SENSITIVITY, (cy - touchCenterY) * ORBIT_SENSITIVITY);
 
-    // Fingers moving apart/together => pinch-zoom.
+    // Fingers moving apart/together => pinch-zoom (dolly forward/back).
     if (pinchDist > 0 && dist > 0) {
-      appendZoom(pinchDist / dist - 1);
+      dollyCamera(pose.distance * (1 - pinchDist / dist));
     }
 
     touchCenterX = cx;
@@ -688,7 +729,7 @@ canvas.addEventListener(
     }
 
     const zoomSpeed = event.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
-    appendZoom(event.deltaY * zoomSpeed);
+    dollyCamera(-pose.distance * event.deltaY * zoomSpeed);
   },
   { passive: false }
 );
