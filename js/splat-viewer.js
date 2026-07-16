@@ -421,9 +421,22 @@ const getFrameDistance = radius => {
 // code, verified against the source) - the setter itself works correctly
 // for actual zoom clamping, but isn't safe to read back.
 let maxZoomDistance = 60;
+
+// The camera component defaults to nearClip=0.1 - way bigger than this
+// splat's whole scale (a few units across) and its 0.001 minimum zoom
+// distance. Zooming in past 0.1 units didn't hit a position limit at all;
+// the target point (and everything near it) was simply behind the near
+// clip plane and getting culled, which reads exactly like "hit an
+// invisible wall" - the geometry didn't get harder to approach, it just
+// stopped being rendered. farClip needs the same scaling in the other
+// direction so the whole scene stays visible when zoomed all the way out.
 function updateZoomRange() {
   maxZoomDistance = Math.max(sceneRadius * 60, 60);
   orbitController.zoomRange = new Vec2(0.001, maxZoomDistance);
+  if (camera.camera) {
+    camera.camera.nearClip = 0.0005;
+    camera.camera.farClip = maxZoomDistance * 2;
+  }
 }
 updateZoomRange();
 
