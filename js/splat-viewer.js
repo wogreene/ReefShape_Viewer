@@ -193,6 +193,10 @@ window.addEventListener("resize", () => app.resizeCanvas());
 // resident regardless of the full scene's size.
 if (app.scene.gsplat) {
   app.scene.gsplat.splatBudget = 3_500_000;
+  // Required for gsplat entities to participate in Picker hit-testing at
+  // all (see clickToCenter below) - without this, the picker's ID/depth
+  // buffer never gets gsplat contributions, so every pick silently misses.
+  app.scene.gsplat.enableIds = true;
 }
 
 // The camera sits under a "rig" entity: our orbit/pan/zoom/WASD logic moves
@@ -225,7 +229,12 @@ clickMarker.enabled = false;
 if (clickMarker.render) {
   const clickMarkerMaterial = new StandardMaterial();
   clickMarkerMaterial.emissive = new Color(1, 0.9, 0.3);
+  clickMarkerMaterial.emissiveIntensity = 3;
   clickMarkerMaterial.diffuse = new Color(0, 0, 0);
+  // No light components exist in this scene at all, so a normally-lit
+  // material would render solid black - useLighting: false makes emissive
+  // the sole color source, independent of scene lighting.
+  clickMarkerMaterial.useLighting = false;
   clickMarkerMaterial.update();
   clickMarker.render.meshInstances.forEach(mi => {
     mi.material = clickMarkerMaterial;
@@ -832,6 +841,8 @@ function showClickMarker(worldPoint) {
   }, 900);
 }
 
+const currentFocus = new Vec3();
+
 async function clickToCenter(screenX, screenY) {
   if (!camera.camera) return;
 
@@ -840,11 +851,18 @@ async function clickToCenter(screenX, screenY) {
   const y = screenY - rect.top;
 
   picker.resize(rect.width, rect.height);
-  picker.prepare(camera.camera, app.scene);
+  picker.prepare(camera.camera, app.scene, [app.scene.layers.getLayerByName("World")]);
   const hitPoint = await picker.getWorldPointAsync(x, y);
   if (!hitPoint) return; // click missed all geometry (e.g. background/open water)
 
-  clickOffset.copy(hitPoint).sub(zoomTarget);
+  // The offset has to be measured from the point actually at screen center
+  // right now (pose.getFocus() - camera position + forward*distance), not
+  // from zoomTarget: zoomTarget only exists to scale pan/zoom speed and
+  // drifts away from "what's on screen" the moment you pan/orbit/dolly
+  // without an explicit recenter, so anchoring on it here would translate
+  // the clicked point to wherever zoomTarget last was rather than to center.
+  pose.getFocus(currentFocus);
+  clickOffset.copy(hitPoint).sub(currentFocus);
   // 2D mode's camera height is fixed by design (see enter2DMode) - only
   // recenter horizontally there, don't let a click on sloped terrain lift
   // the camera off its pinned height.
