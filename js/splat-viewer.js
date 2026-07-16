@@ -36,6 +36,7 @@ import {
   PROJECTION_ORTHOGRAPHIC,
   PROJECTION_PERSPECTIVE,
   StandardMaterial,
+  Picker,
   createGraphicsDevice
 } from "https://cdn.jsdelivr.net/npm/playcanvas@2.20.0/+esm";
 
@@ -228,6 +229,7 @@ if (clickMarker.render) {
   clickMarkerMaterial.update();
   clickMarker.render.meshInstances.forEach(mi => {
     mi.material = clickMarkerMaterial;
+    mi.pick = false; // never let the marker itself be the click-to-center hit
   });
 }
 let clickMarkerHideTimer = null;
@@ -803,36 +805,16 @@ function planarPanDrag(deltaX, deltaY) {
 // zoomTarget far apart or otherwise "out of range" - click a point on the
 // reef and both snap back into a sane relationship, anchored on real
 // geometry instead of empty space.
-const rayNear = new Vec3();
-const rayFar = new Vec3();
-const rayDir = new Vec3();
-const rayStep = new Vec3();
+//
+// Hit-testing uses the engine's own Picker (depth-enabled), the same
+// mechanism Supersplat's own click-to-focus uses under the hood - it renders
+// a small offscreen pass and reads back the exact world position of whatever
+// gsplat/mesh is actually visible at that pixel, so the result always lands
+// on the real rendered surface rather than an approximated collision proxy.
+// Sized to CSS pixels (canvas.clientWidth/Height) rather than the physical
+// device resolution so click coordinates need no devicePixelRatio scaling.
+const picker = new Picker(app, canvas.clientWidth || 1, canvas.clientHeight || 1, true);
 const clickOffset = new Vec3();
-
-// Marches a ray through the voxel data in fixed steps looking for the first
-// solid hit - the actual reef surface, not a guessed/fixed elevation. This
-// is why the marker (and the recenter target) can sit right on the coral
-// instead of floating at some assumed flat height above it.
-function raycastVoxels(origin, direction, maxDistance) {
-  if (!voxelOctree) return null;
-  const stepSize = Math.max(voxelOctree.voxelResolution * 2, 0.01);
-  const steps = Math.floor(maxDistance / stepSize);
-  for (let i = 1; i <= steps; i++) {
-    rayStep.copy(origin).addScaled(direction, i * stepSize);
-    if (isSolidAt(rayStep)) return rayStep.clone();
-  }
-  return null;
-}
-
-// Fallback for when there's no voxel data (or the click missed all of it,
-// e.g. a click out into open water) - intersect a horizontal plane at the
-// current zoomTarget height rather than doing nothing.
-function intersectGroundPlane(origin, direction, planeY) {
-  if (Math.abs(direction.y) < 1e-6) return null;
-  const t = (planeY - origin.y) / direction.y;
-  if (t <= 0) return null;
-  return new Vec3().copy(origin).addScaled(direction, t);
-}
 
 function showClickMarker(worldPoint) {
   // Sized off the current zoom depth, not the whole scene's fixed radius -
@@ -850,22 +832,17 @@ function showClickMarker(worldPoint) {
   }, 900);
 }
 
-function clickToCenter(screenX, screenY) {
+async function clickToCenter(screenX, screenY) {
   if (!camera.camera) return;
 
   const rect = canvas.getBoundingClientRect();
-  const scaleX = app.graphicsDevice.width / rect.width;
-  const scaleY = app.graphicsDevice.height / rect.height;
-  const x = (screenX - rect.left) * scaleX;
-  const y = (screenY - rect.top) * scaleY;
+  const x = screenX - rect.left;
+  const y = screenY - rect.top;
 
-  camera.camera.screenToWorld(x, y, camera.camera.nearClip, rayNear);
-  camera.camera.screenToWorld(x, y, camera.camera.farClip, rayFar);
-  rayDir.copy(rayFar).sub(rayNear).normalize();
-
-  const hitPoint = raycastVoxels(rayNear, rayDir, maxZoomDistance) ||
-    intersectGroundPlane(rayNear, rayDir, zoomTarget.y);
-  if (!hitPoint) return;
+  picker.resize(rect.width, rect.height);
+  picker.prepare(camera.camera, app.scene);
+  const hitPoint = await picker.getWorldPointAsync(x, y);
+  if (!hitPoint) return; // click missed all geometry (e.g. background/open water)
 
   clickOffset.copy(hitPoint).sub(zoomTarget);
   // 2D mode's camera height is fixed by design (see enter2DMode) - only
