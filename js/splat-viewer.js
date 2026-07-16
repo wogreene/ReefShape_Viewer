@@ -5,17 +5,11 @@
 // camera hooks - so there's nowhere to add custom camera limits or timepoint
 // swapping on top of it).
 //
-// The camera controller below is ported from a Supersplat "Vite project"
-// export's src/main.ts (PlayCanvas's own generated starter for a published
-// splat), with three changes:
-//   1) tilt is clamped to a near-top-down range (pitch 45-90, 90 = straight
-//      down) instead of the full -90..90 range
-//   2) WASD/arrow "advance" glides horizontally across the reef instead of
-//      dollying toward/away from it (which is what full 3D "forward" does
-//      once the camera is pitched close to top-down)
-//   3) the splat asset can be swapped (timepoints) without touching the
-//      camera's yaw/pitch/distance/target, since they're never coupled to
-//      which splat is currently loaded
+// The camera controller is built on PlayCanvas's own Pose/OrbitController
+// primitives (src/extras/input/ - shipped in the engine package, alpha but
+// used in the engine's own orbit-camera example) rather than a fully
+// hand-rolled implementation. See the "Camera controller" section below for
+// why.
 
 import {
   AppBase,
@@ -30,12 +24,11 @@ import {
   Entity,
   FILLMODE_FILL_WINDOW,
   RESOLUTION_AUTO,
+  Vec2,
   Vec3,
-  Mesh,
-  MeshInstance,
-  ShaderMaterial,
-  SEMANTIC_POSITION,
-  CULLFACE_NONE,
+  Pose,
+  OrbitController,
+  InputFrame,
   DEVICETYPE_WEBGPU,
   DEVICETYPE_WEBGL2,
   XRTYPE_VR,
@@ -218,110 +211,6 @@ camera.addComponent("camera", {
 cameraRig.addChild(camera);
 
 // --------------------------------------------------
-// Click/tap-to-focus marker
-//
-// A small flat white disc dropped at the clicked/tapped point, visible the
-// moment the click registers (well before the camera actually starts
-// moving) so the interaction reads as "yes, that landed" - and left in
-// place until the next click, as a lightweight breadcrumb of what's
-// currently focused.
-// --------------------------------------------------
-
-const MARKER_SEGMENTS = 32;
-const MARKER_SCREEN_RADIUS_FACTOR = 0.02; // fraction of camera distance
-const MARKER_MIN_RADIUS = 0.01; // world units - keeps it visible even zoomed in tight
-const MARKER_RING_INNER_RATIO = 0.8; // inner edge as a fraction of the outer radius
-
-// A ring (annulus), not a filled disc: two concentric rows of vertices
-// (outer edge at radius 1, inner edge at MARKER_RING_INNER_RATIO) stitched
-// into a strip of quads, leaving the middle hollow.
-function createClickMarker() {
-  const positions = [];
-  const indices = [];
-  for (let i = 0; i <= MARKER_SEGMENTS; i++) {
-    const angle = (i / MARKER_SEGMENTS) * Math.PI * 2;
-    const cx = Math.cos(angle);
-    const cz = Math.sin(angle);
-    positions.push(cx, 0, cz); // outer vertex
-    positions.push(cx * MARKER_RING_INNER_RATIO, 0, cz * MARKER_RING_INNER_RATIO); // inner vertex
-    if (i > 0) {
-      const outerPrev = (i - 1) * 2;
-      const innerPrev = outerPrev + 1;
-      const outerCur = i * 2;
-      const innerCur = outerCur + 1;
-      indices.push(outerPrev, outerCur, innerPrev, innerPrev, outerCur, innerCur);
-    }
-  }
-
-  const mesh = new Mesh(device);
-  mesh.setPositions(positions);
-  mesh.setIndices(indices);
-  mesh.update();
-
-  const material = new ShaderMaterial({
-    uniqueName: "ClickMarker",
-    attributes: { aPosition: SEMANTIC_POSITION },
-    vertexGLSL: `
-      attribute vec3 aPosition;
-      uniform mat4 matrix_model;
-      uniform mat4 matrix_viewProjection;
-      varying vec3 vPos;
-      void main(void) {
-        vPos = aPosition;
-        gl_Position = matrix_viewProjection * matrix_model * vec4(aPosition, 1.0);
-      }
-    `,
-    fragmentGLSL: `
-      precision mediump float;
-      varying vec3 vPos;
-      void main(void) {
-        gl_FragColor = vec4(vec3(1.0), 1.0) * (vPos.x * 0.0 + 1.0);
-      }
-    `,
-    vertexWGSL: `
-      attribute aPosition: vec3f;
-      uniform matrix_model: mat4x4f;
-      uniform matrix_viewProjection: mat4x4f;
-      varying vPos: vec3f;
-      @vertex fn vertexMain(input: VertexInput) -> VertexOutput {
-        var output: VertexOutput;
-        output.vPos = input.aPosition;
-        output.position = uniform.matrix_viewProjection * uniform.matrix_model * vec4f(input.aPosition, 1.0);
-        return output;
-      }
-    `,
-    fragmentWGSL: `
-      varying vPos: vec3f;
-      @fragment fn fragmentMain(input: FragmentInput) -> FragmentOutput {
-        var output: FragmentOutput;
-        output.color = vec4f(vec3f(1.0), 1.0) * (input.vPos.x * 0.0 + 1.0);
-        return output;
-      }
-    `
-  });
-  material.cull = CULLFACE_NONE;
-
-  const meshInstance = new MeshInstance(mesh, material);
-  const entity = new Entity("ClickMarker");
-  entity.addComponent("render", { meshInstances: [meshInstance] });
-  entity.enabled = false;
-  app.root.addChild(entity);
-  return entity;
-}
-
-const clickMarker = createClickMarker();
-
-// Sized relative to the camera's current distance rather than a fixed world
-// size, so it reads as roughly the same on-screen size whether you're
-// zoomed in tight or framing the whole reef.
-function showClickMarkerAt(point) {
-  const radius = Math.max(distance * MARKER_SCREEN_RADIUS_FACTOR, MARKER_MIN_RADIUS);
-  clickMarker.setLocalScale(radius, 1, radius);
-  clickMarker.setPosition(point.x, point.y + 0.001, point.z);
-  clickMarker.enabled = true;
-}
-
-// --------------------------------------------------
 // Collision voxels
 //
 // A sparse voxel octree (PlayCanvas's own .voxel.json/.bin format, exported
@@ -414,14 +303,10 @@ class VoxelOctree {
   }
 }
 
-// Collision *enforcement* is disabled for now - it was getting in the way
-// of navigating the reef more than it was helping. The voxel data itself is
-// still loaded (below) and used for something else entirely: sampling real
-// substrate elevation for the click marker (see getSurfaceElevation) - so
-// this only gates the movement-blocking behavior in updateCamera, not the
-// load itself.
-const ENABLE_VOXEL_COLLISION = false;
-
+// Collision enforcement against this data is disabled for now (see the
+// camera controller below) - it was getting in the way of navigating the
+// reef more than it was helping. The data is still loaded here so it's
+// available for isSolidAtWorld debugging and easy to wire back up later.
 let voxelOctree = null;
 const voxelQueryPoint = new Vec3();
 
@@ -433,55 +318,12 @@ function worldToVoxelSpace(worldPoint) {
   return voxelQueryPoint;
 }
 
-// Looks up the real reef surface height at a given (worldX, worldZ) by
-// scanning the voxel column downward from open water until hitting solid,
-// and returning the world Y of that first hit - i.e. where the substrate
-// actually is at that point, rather than assuming a flat reference plane.
-// Returns null if there's no voxel data, the column is out of the scanned
-// area, or nothing solid was found above the seafloor.
-//
-// Critically, the scan can't start from the grid's own top boundary: per
-// the format's flood-fill design (see isSolid above), "solid" means
-// "outside the flood-filled open-water pocket", not "physical reef
-// material" - the outer edge of the whole captured *volume* reads as solid
-// too, since the fill never reached out there. Starting the downward scan
-// from there would hit that boundary immediately, on every column,
-// regardless of where the real substrate is (confirmed empirically - it
-// returned the same height for every input). Starting instead from the
-// camera's own current height is safe because the camera is - by how this
-// viewer works - always floating in open water above the reef, so it's
-// guaranteed to start outside any solid region.
-function getSurfaceElevation(worldX, worldZ) {
-  if (!voxelOctree) return null;
-
-  const { gridMin, gridMax, voxelResolution } = voxelOctree;
-  const voxelX = -worldX;
-  const voxelZ = worldZ;
-  if (voxelX < gridMin[0] || voxelX > gridMax[0] || voxelZ < gridMin[2] || voxelZ > gridMax[2]) return null;
-
-  // voxel Y = -world Y (see worldToVoxelSpace), so the world-Y scan range
-  // [gridMax down to gridMin] corresponds to voxel Y [gridMin up to gridMax].
-  const worldYMax = Math.min(cameraPosition.y, -gridMin[1]);
-  const worldYMin = -gridMax[1];
-  for (let worldY = worldYMax; worldY >= worldYMin; worldY -= voxelResolution) {
-    if (voxelOctree.isSolid(voxelX, -worldY, voxelZ)) return worldY;
-  }
-  return null;
-}
-
 if (voxelCollision) {
   (async () => {
     try {
       const meta = await fetch(`${voxelCollision}.json`, { cache: "no-store" }).then(r => r.json());
       const buffer = await fetch(`${voxelCollision}.bin`, { cache: "no-store" }).then(r => r.arrayBuffer());
       voxelOctree = new VoxelOctree(meta, buffer);
-      // Seed the rollback baseline from wherever the camera already is
-      // (the authored/framed pose) rather than stale defaults, since
-      // collision checking only starts once this promise resolves.
-      lastGoodYaw = yaw;
-      lastGoodPitch = pitch;
-      lastGoodDistance = distance;
-      lastGoodTarget.copy(target);
     } catch (e) {
       console.warn("Collision voxels unavailable:", e);
     }
@@ -490,17 +332,40 @@ if (voxelCollision) {
 
 // --------------------------------------------------
 // Camera controller
-//   - left-drag / one-finger touch-drag pans horizontally, same as WASD/arrows
-//   - right-drag / two-finger touch-drag tilts (orbit)
-//   - wheel zooms; pinch (two-finger, distance changing) zooms on touch
-//   - WASD/arrows glide horizontally across the reef (no vertical dolly)
-//   - pitch clamped to [30, 90] (90 = straight down) so the view stays
-//     primarily top-down instead of tilting toward the horizon
+//
+// Built on PlayCanvas's own Pose/OrbitController primitives instead of a
+// fully hand-rolled camera. A hand-rolled version of this (tracking yaw/
+// pitch/distance/target as plain numbers, applying orientation via
+// lookAt()) went through several rounds of bugs: gimbal lock at straight-
+// down pitch, pan/zoom math that silently stopped scaling correctly at
+// close zoom, and a click-to-focus feature that only ever turned the
+// camera instead of moving it. PlayCanvas's own primitives (used in the
+// engine's own orbit-camera example) avoid those problems structurally:
+//   - Pose applies orientation via setEulerAngles(), not lookAt(), so there's
+//     no gimbal-lock singularity at pitch=90 (straight down) to guard against.
+//   - OrbitController's zoom/orbit math is anchored to the camera's own
+//     current distance, not an external reference height, so it can't drift
+//     out of scale the way the hand-rolled version did.
+//
+// Two things are still hand-rolled here, because they're specific
+// requirements for this project rather than generic orbit-camera behavior:
+//   - WASD/arrows AND left-drag both move the camera across the *flat*
+//     horizontal plane (ignoring pitch tilt), rather than PlayCanvas's
+//     built-in view-plane pan - this project wants both to feel like
+//     "planar" movement across the reef surface, driven by key state for
+//     WASD and directly by drag distance for the mouse/touch version.
+//   - the pitch clamp's default range (30-90 degrees, 90 = straight down)
+//     instead of OrbitController's default of unrestricted.
+//
+// Button mapping:
+//   - left-drag / one-finger touch-drag = planar pan
+//   - right-drag / two-finger touch-drag = orbit (tilt/rotate)
+//   - wheel / pinch = zoom
 // --------------------------------------------------
 
 const DEFAULT_FOV = 75;
-const ORBIT_SENSITIVITY = (18 * 0.5) / 60;
-const TRACKPAD_ORBIT_SENSITIVITY = (18 * 0.75) / 60;
+const ORBIT_SENSITIVITY = 0.2;
+const TRACKPAD_ORBIT_SENSITIVITY = 0.3;
 const MOVE_SPEED = 4;
 const FLY_MOVE_ACCELERATION_DAMPING = 0.992;
 const FLY_MOVE_DECELERATION_DAMPING = 0.993;
@@ -510,34 +375,187 @@ const MIN_PITCH = 30; // can't tilt further toward the horizon than this
 const MAX_PITCH = 90; // straight down
 const MIN_SCENE_RADIUS = 0.5;
 
-const target = new Vec3(0, 0, 0);
-const cameraPosition = new Vec3();
-const forward = new Vec3();
-const right = new Vec3();
-const up = new Vec3();
-const flatForward = new Vec3();
-const move = new Vec3();
-const desiredMove = new Vec3();
-const flyVelocity = new Vec3();
-const nextTarget = new Vec3();
-const worldAabbCenter = new Vec3();
-const pressedKeys = new Set();
+const orbitController = new OrbitController();
+// Pose applies rotation as Euler angles where angles.x is the *negative* of
+// the "pitch" used everywhere else in this file (see Pose.look/getFocus in
+// the engine source - angles.x = -elevation) - so our [MIN_PITCH, MAX_PITCH]
+// tilt range becomes [-MAX_PITCH, -MIN_PITCH] here.
+orbitController.pitchRange = new Vec2(-MAX_PITCH, -MIN_PITCH);
+// Instant response (no damping) to match the crisp, 1:1 feel this project
+// wants rather than the eased/springy feel OrbitController defaults to.
+orbitController.rotateDamping = 0;
+orbitController.zoomDamping = 0;
+orbitController.moveDamping = 0;
 
-let yaw = -45;
-let pitch = MAX_PITCH;
-let distance = 3;
+const pose = new Pose();
+const inputFrame = new InputFrame({ move: [0, 0, 0], rotate: [0, 0, 0] });
+
 let fov = DEFAULT_FOV;
 let sceneRadius = 1;
 let isControlKeyDown = false;
 let hasLoadedOnce = false;
 
-// Last camera state that passed the collision check - rolled back to
-// whenever a move would put the eye inside solid voxels, so blocked moves
-// just don't happen rather than needing per-input-handler special casing.
-let lastGoodYaw = yaw;
-let lastGoodPitch = pitch;
-let lastGoodDistance = distance;
-const lastGoodTarget = new Vec3();
+const right = new Vec3();
+const flatForward = new Vec3();
+const move = new Vec3();
+const desiredMove = new Vec3();
+const flyVelocity = new Vec3();
+const worldAabbCenter = new Vec3();
+const pressedKeys = new Set();
+
+const damp = (damping, dt) => 1 - Math.pow(damping, dt * 1000);
+
+const getFrameDistance = radius => {
+  const halfFovRad = (fov * Math.PI) / 360;
+  return radius / Math.sin(halfFovRad);
+};
+
+// sceneRadius comes from the splat's raw AABB, which photogrammetry
+// captures often blow out with a handful of stray outlier gaussians far
+// from the actual reef - the 60x multiplier just needs to be generous
+// enough to frame/zoom out past that, not physically meaningful.
+//
+// Tracked separately from orbitController.zoomRange (rather than reading it
+// back) because that getter appears to read a different internal field
+// than its own setter writes to (an inconsistency in the engine's alpha
+// code, verified against the source) - the setter itself works correctly
+// for actual zoom clamping, but isn't safe to read back.
+let maxZoomDistance = 60;
+function updateZoomRange() {
+  maxZoomDistance = Math.max(sceneRadius * 60, 60);
+  orbitController.zoomRange = new Vec2(0.001, maxZoomDistance);
+}
+updateZoomRange();
+
+// Flat (pitch-ignoring) horizontal basis derived from the current yaw, used
+// by both WASD/arrows and left-drag pan so "planar movement" means the same
+// thing everywhere: gliding across the reef surface, not dollying toward/
+// away from it the way full 3D "forward" would once pitched close to
+// top-down.
+function updateFlatBasis() {
+  const yawRad = (pose.angles.y * Math.PI) / 180;
+  right.set(Math.cos(yawRad), 0, -Math.sin(yawRad));
+  flatForward.set(-Math.sin(yawRad), 0, -Math.cos(yawRad));
+}
+
+// Translates the camera (and, since the orbit target moves by the same
+// amount, the point it orbits around) by a world-space offset, without
+// touching angles or distance. Re-seeding the controller like this (rather
+// than reaching into its private state) is the same pattern PlayCanvas's
+// own camera-controls.mjs script uses for its focus/reset/look methods.
+const movedPose = new Pose();
+function translateCamera(offset) {
+  movedPose.position.copy(pose.position).add(offset);
+  movedPose.angles.copy(pose.angles);
+  movedPose.distance = pose.distance;
+  orbitController.attach(movedPose, false);
+  pose.copy(movedPose);
+}
+
+function setPose(position, angles, distance) {
+  pose.set(position, angles, distance);
+  orbitController.attach(pose, false);
+  cameraRig.setPosition(pose.position);
+  cameraRig.setEulerAngles(pose.angles);
+}
+
+const sphericalPosition = new Vec3();
+function positionFromOrbit(target, yaw, pitch, distance, out) {
+  const yawRad = (yaw * Math.PI) / 180;
+  const pitchRad = (pitch * Math.PI) / 180;
+  const cosPitch = Math.cos(pitchRad);
+  return out.set(
+    target.x + distance * Math.sin(yawRad) * cosPitch,
+    target.y + distance * Math.sin(pitchRad),
+    target.z + distance * Math.cos(yawRad) * cosPitch
+  );
+}
+
+const clampDistance = value => Math.max(0.001, Math.min(maxZoomDistance, value));
+
+const setDefaultFrame = () => {
+  sceneRadius = 1;
+  updateZoomRange();
+  const distance = clampDistance(getFrameDistance(sceneRadius));
+  const position = positionFromOrbit(Vec3.ZERO, -45, MAX_PITCH, distance, sphericalPosition);
+  setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
+};
+
+const posePosition = new Vec3();
+const poseTarget = new Vec3();
+const applyCameraPose = authoredPose => {
+  posePosition.set(...authoredPose.position);
+  poseTarget.set(...authoredPose.target);
+  const poseDistance = posePosition.distance(poseTarget);
+
+  // a pose looking at its own position has no view direction
+  if (!Number.isFinite(poseDistance) || poseDistance < 1e-6) {
+    return false;
+  }
+
+  pose.look(posePosition, poseTarget);
+  // Authored poses from the Supersplat editor are often more oblique than
+  // our tilt floor (Sandy Cay's is ~38deg) - clamp on the way in.
+  const clampedPitch = Math.max(-MAX_PITCH, Math.min(-MIN_PITCH, pose.angles.x));
+  fov = authoredPose.fov;
+  if (camera.camera) camera.camera.fov = fov;
+
+  setPose(pose.position, new Vec3(clampedPitch, pose.angles.y, 0), pose.distance);
+  return true;
+};
+
+const frameSplat = (splat, aabb) => {
+  let target = Vec3.ZERO;
+  if (aabb) {
+    splat.getWorldTransform().transformPoint(aabb.center, worldAabbCenter);
+    target = worldAabbCenter;
+    sceneRadius = Math.max(aabb.halfExtents.length(), MIN_SCENE_RADIUS);
+  } else {
+    sceneRadius = 1;
+  }
+  updateZoomRange();
+
+  const distance = clampDistance(getFrameDistance(sceneRadius));
+  const position = positionFromOrbit(target, -45, MAX_PITCH, distance, sphericalPosition);
+  setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
+};
+
+function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {
+  inputFrame.deltas.rotate.append([yawDeltaDeg, pitchDeltaDeg, 0]);
+}
+
+function appendZoom(fractionalDelta) {
+  inputFrame.deltas.move.append([0, 0, fractionalDelta]);
+}
+
+// "Grab and drag" planar pan: the point on the flat plane under the cursor
+// at the start of a move stays pinned under the cursor at the end of it, at
+// any zoom level, since halfWidth/halfHeight scale with the camera's actual
+// current distance.
+const panDelta = new Vec3();
+function planarPanDrag(deltaX, deltaY) {
+  updateFlatBasis();
+
+  const width = canvas.clientWidth || window.innerWidth;
+  const height = canvas.clientHeight || window.innerHeight;
+  const halfHeight = pose.distance * Math.tan((fov * Math.PI) / 360);
+  const halfWidth = halfHeight * (width / height);
+
+  panDelta
+    .set(0, 0, 0)
+    .addScaled(right, (-deltaX / width) * halfWidth * 2)
+    .addScaled(flatForward, (deltaY / height) * halfHeight * 2);
+  translateCamera(panDelta);
+}
+
+function touchCenterAndDist(activePointers) {
+  const [a, b] = Array.from(activePointers.values());
+  return {
+    cx: (a.x + b.x) / 2,
+    cy: (a.y + b.y) / 2,
+    dist: Math.hypot(a.x - b.x, a.y - b.y)
+  };
+}
 
 // Pointer/touch state. Every active pointer (mouse button held, or finger
 // down) is tracked by id so we can tell a one-finger touch (pan) from a
@@ -551,384 +569,7 @@ let touchCenterX = 0;
 let touchCenterY = 0;
 let pinchDist = 0;
 
-// Click/tap-to-focus: tracked separately from drag state since a "click" is
-// really a pointerdown/pointerup pair with negligible movement/duration in
-// between, not a distinct gesture the pointer handlers already model.
-const pointerDownInfo = new Map(); // pointerId -> {x, y, time}
-const TAP_MAX_DURATION_MS = 300;
-const TAP_MAX_MOVEMENT_PX = 10;
-
-// Smooth pan-to-target animation, driven by a click/tap (see
-// focusOnPoint/handleClickAt below). Yaw/pitch/distance are left alone -
-// only the target moves, which moves the camera's actual world position by
-// the same amount (since camera position = target + a fixed yaw/pitch/
-// distance offset from it). That's deliberate: an early version also eased
-// yaw and distance, but at the near-top-down pitches this viewer normally
-// sits at, yaw barely affects camera position at all (cos(pitch) ~ 0), so
-// the yaw swing just spun the view in place while the actual walk-over
-// motion happening through the target was easy to miss - it read as "the
-// camera didn't move." Plain target-only panning is unambiguous: the camera
-// visibly translates to sit over the new point, at any pitch.
-const FOCUS_ANIM_DURATION_MS = 550;
-const focusAnim = {
-  active: false,
-  startTarget: new Vec3(),
-  endTarget: new Vec3(),
-  startTime: 0
-};
-
-const clampPitch = p => Math.max(MIN_PITCH, Math.min(MAX_PITCH, p));
-
-const updateCameraPosition = () => {
-  const yawRad = (yaw * Math.PI) / 180;
-  const pitchRad = (pitch * Math.PI) / 180;
-  const cosPitch = Math.cos(pitchRad);
-
-  cameraPosition.set(
-    target.x + distance * Math.sin(yawRad) * cosPitch,
-    target.y + distance * Math.sin(pitchRad),
-    target.z + distance * Math.cos(yawRad) * cosPitch
-  );
-};
-
-const updateCamera = () => {
-  // updateBasis() computes cameraPosition plus a {right, up, forward} basis
-  // from yaw/pitch. Passing our own `up` hint to lookAt (rather than letting
-  // it default to world-up) is what matters here: `up` is built as
-  // cross(right, forward), which is mathematically perpendicular to `forward`
-  // at every yaw/pitch - including pitch === 90 (straight down), where world
-  // Y is parallel to `forward` and a lookAt() left to its own default up
-  // vector hits a singularity and flips the whole orientation (and, with it,
-  // whatever movement basis is derived from it that frame).
-  updateBasis();
-
-  // Collision: if the eye would end up inside solid voxels, roll yaw/pitch/
-  // distance/target back to the last position that was clear instead of
-  // moving there. No per-input special-casing needed - every pan/orbit/zoom/
-  // WASD update funnels through here. Fails open (no blocking) until the
-  // voxel data has loaded, or if this reef has none.
-  //
-  // Pulling back (distance increasing) is exempt: the voxel data is a
-  // flood fill from a seed point in the open water, so it's only ever
-  // "solid" beyond the fill - which includes the region above the actual
-  // water surface, since the fill has nowhere to go once it reaches the
-  // top of the captured volume. That's a real boundary of the scan, not
-  // reef material, and zooming out to frame the whole reef can legitimately
-  // cross it. Getting closer is exactly the case this exists to stop.
-  const isBlocked = () => {
-    const p = worldToVoxelSpace(cameraPosition);
-    return voxelOctree.isSolid(p.x, p.y, p.z);
-  };
-
-  if (ENABLE_VOXEL_COLLISION && voxelOctree && distance <= lastGoodDistance) {
-    if (isBlocked()) {
-      // Full move blocked - before giving up entirely, try sliding along
-      // just one horizontal target axis (keeping yaw/pitch/distance as
-      // requested). Reef terrain gets more irregular the farther you
-      // explore from the open starting pocket, and a hard "undo the whole
-      // gesture" on the first graze felt broken - a wall should let you
-      // slide along it, not stonewall the entire drag.
-      const candidateX = target.x;
-      const candidateZ = target.z;
-
-      target.set(candidateX, target.y, lastGoodTarget.z);
-      updateBasis();
-
-      if (isBlocked()) {
-        target.set(lastGoodTarget.x, target.y, candidateZ);
-        updateBasis();
-
-        if (isBlocked()) {
-          yaw = lastGoodYaw;
-          pitch = lastGoodPitch;
-          distance = lastGoodDistance;
-          target.copy(lastGoodTarget);
-          updateBasis();
-        }
-      }
-    }
-
-    if (!isBlocked()) {
-      lastGoodYaw = yaw;
-      lastGoodPitch = pitch;
-      lastGoodDistance = distance;
-      lastGoodTarget.copy(target);
-    }
-  } else {
-    lastGoodYaw = yaw;
-    lastGoodPitch = pitch;
-    lastGoodDistance = distance;
-    lastGoodTarget.copy(target);
-  }
-
-  cameraRig.setPosition(cameraPosition);
-  cameraRig.lookAt(target, up);
-};
-
-const getFrameDistance = radius => {
-  const halfFovRad = (fov * Math.PI) / 360;
-  return radius / Math.sin(halfFovRad);
-};
-
-const clampDistance = value => {
-  // sceneRadius comes from the splat's raw AABB, which photogrammetry
-  // captures often blow out with a handful of stray outlier gaussians far
-  // from the actual reef - scaling the close-up limit off it (as this used
-  // to) made zooming in stop far earlier than intended. Collision (see
-  // VoxelOctree above) is the real stopping point for getting close now;
-  // this floor just keeps distance off zero/negative.
-  const minDistance = 0.001;
-  const maxDistance = Math.max(sceneRadius * 60, 60);
-  return Math.max(minDistance, Math.min(maxDistance, value));
-};
-
-const damp = (damping, dt) => 1 - Math.pow(damping, dt * 1000);
-
-const setDefaultFrame = () => {
-  target.set(0, 0, 0);
-  sceneRadius = 1;
-  yaw = -45;
-  pitch = MAX_PITCH;
-  distance = getFrameDistance(sceneRadius);
-  updateCamera();
-};
-
-const applyCameraPose = pose => {
-  const dx = pose.position[0] - pose.target[0];
-  const dy = pose.position[1] - pose.target[1];
-  const dz = pose.position[2] - pose.target[2];
-  const poseDistance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-  // a pose looking at its own position has no view direction
-  if (!Number.isFinite(poseDistance) || poseDistance < 1e-6) {
-    return false;
-  }
-
-  target.set(pose.target[0], pose.target[1], pose.target[2]);
-  yaw = (Math.atan2(dx, dz) * 180) / Math.PI;
-  // Authored poses from the Supersplat editor are often more oblique than
-  // our new tilt floor (Sandy Cay's is ~38deg) - clamp on the way in.
-  pitch = clampPitch((Math.asin(Math.max(-1, Math.min(1, dy / poseDistance))) * 180) / Math.PI);
-  distance = poseDistance;
-  fov = pose.fov;
-
-  if (camera.camera) camera.camera.fov = fov;
-
-  updateCamera();
-  return true;
-};
-
-const frameSplat = (splat, aabb) => {
-  if (aabb) {
-    splat.getWorldTransform().transformPoint(aabb.center, worldAabbCenter);
-    target.copy(worldAabbCenter);
-    sceneRadius = Math.max(aabb.halfExtents.length(), MIN_SCENE_RADIUS);
-  } else {
-    target.set(0, 0, 0);
-    sceneRadius = 1;
-  }
-
-  yaw = -45;
-  pitch = MAX_PITCH;
-  distance = clampDistance(getFrameDistance(sceneRadius));
-  updateCamera();
-};
-
-const updateBasis = () => {
-  updateCameraPosition();
-  const yawRad = (yaw * Math.PI) / 180;
-  const pitchRad = (pitch * Math.PI) / 180;
-  const cosPitch = Math.cos(pitchRad);
-
-  forward.set(-Math.sin(yawRad) * cosPitch, -Math.sin(pitchRad), -Math.cos(yawRad) * cosPitch).normalize();
-  right.set(Math.cos(yawRad), 0, -Math.sin(yawRad)).normalize();
-  up.cross(right, forward).normalize();
-
-  // Flatten forward to the horizontal plane so WASD/arrow "advance" glides
-  // across the reef surface instead of dollying toward/away from it - at
-  // near-top-down pitches, true 3D "forward" is mostly vertical.
-  flatForward.set(forward.x, 0, forward.z);
-  if (flatForward.lengthSq() > 1e-8) {
-    flatForward.normalize();
-  } else {
-    // Looking (almost) straight down: fall back to the yaw's heading.
-    flatForward.set(-Math.sin(yawRad), 0, -Math.cos(yawRad));
-  }
-};
-
-// Casts a ray from the camera through a screen pixel and intersects it with
-// the horizontal plane at world height `planeY`, writing the result into
-// `out`. Returns null if the ray is (near) parallel to the plane or points
-// away from it - shouldn't normally happen given pitch is always tilted
-// well away from the horizon, but a drag flung to the edge of the screen at
-// a low FOV could still graze it.
-const rayDir = new Vec3();
-function computeRayDir(screenX, screenY, out) {
-  const width = canvas.clientWidth || window.innerWidth;
-  const height = canvas.clientHeight || window.innerHeight;
-  const ndcX = (screenX / width) * 2 - 1;
-  const ndcY = 1 - (screenY / height) * 2;
-  const tanHalfFovY = Math.tan((fov * Math.PI) / 360);
-  const tanHalfFovX = tanHalfFovY * (width / height);
-
-  return out
-    .copy(forward)
-    .addScaled(right, ndcX * tanHalfFovX)
-    .addScaled(up, ndcY * tanHalfFovY)
-    .normalize();
-}
-
-// Intersects a screen-space ray with the plane through `target`,
-// perpendicular to the camera's `forward` direction, and writes the result
-// into `out`. Because that plane sits exactly `distance` out from the
-// camera along `forward` by construction, the ray-plane math scales
-// directly with `distance` - which is the fix for panning/zooming feeling
-// "stuck" at close zoom: an earlier version intersected a *horizontal*
-// ground plane fixed at `target.y` instead, so as `distance` shrunk toward
-// zero on zoom-in, the camera's height above that fixed-height plane also
-// shrunk toward zero, collapsing the ray/plane intersection math to almost
-// no movement per pixel of drag regardless of where the actual reef surface
-// was. This plane is anchored to the camera's own current geometry instead
-// of an external, possibly-stale height, so it scales correctly at any zoom
-// level and any pitch - the standard "trackball pan" plane used by most
-// orbit-camera tools (Blender, SketchUp, etc.).
-function screenToViewPlanePoint(screenX, screenY, out) {
-  computeRayDir(screenX, screenY, rayDir);
-  // Guards against a momentarily-zero canvas size (seen transiently during
-  // some resize/layout events), which would otherwise divide-by-zero into a
-  // NaN ray direction that Math.abs(...) < 1e-6 doesn't catch (comparisons
-  // against NaN are always false) and permanently corrupt the camera target.
-  if (!Number.isFinite(rayDir.x) || !Number.isFinite(rayDir.y) || !Number.isFinite(rayDir.z)) return null;
-
-  const denom = rayDir.dot(forward);
-  if (Math.abs(denom) < 1e-6) return null;
-
-  const t = distance / denom;
-  if (t <= 0) return null;
-
-  out.copy(cameraPosition).addScaled(rayDir, t);
-  return out;
-}
-
-// True "grab and drag" pan: the point under the cursor at the start of a
-// move stays pinned under the cursor at the end of it, at any zoom level.
-const rayHitPrev = new Vec3();
-const rayHitCur = new Vec3();
-const panDrag = (prevX, prevY, curX, curY) => {
-  updateBasis();
-
-  const hitPrev = screenToViewPlanePoint(prevX, prevY, rayHitPrev);
-  const hitCur = screenToViewPlanePoint(curX, curY, rayHitCur);
-  if (!hitPrev || !hitCur) return;
-
-  nextTarget.copy(hitPrev).sub(hitCur);
-  target.add(nextTarget);
-  updateCamera();
-};
-
-// Zoom toward whatever world point is under the cursor/pinch-center rather
-// than always toward the orbit target: solves for the target shift that
-// keeps that point fixed on screen while distance changes, so zooming in
-// on something off-center actually moves you toward it instead of just
-// changing FOV-like scale around whatever the target happened to be.
-const zoomRayDir = new Vec3();
-const zoomAtScreenPoint = (screenX, screenY, factor) => {
-  updateBasis();
-
-  const planePoint = screenToViewPlanePoint(screenX, screenY, rayHitPrev);
-  const newDistance = clampDistance(distance * factor);
-
-  if (!planePoint) {
-    distance = newDistance;
-    updateCamera();
-    return;
-  }
-
-  computeRayDir(screenX, screenY, zoomRayDir);
-
-  if (Math.abs(zoomRayDir.y) > 1e-6) {
-    const tPrime = (newDistance * forward.y) / zoomRayDir.y;
-    target.set(
-      planePoint.x - tPrime * zoomRayDir.x + newDistance * forward.x,
-      target.y,
-      planePoint.z - tPrime * zoomRayDir.z + newDistance * forward.z
-    );
-  }
-
-  distance = newDistance;
-  updateCamera();
-};
-
-// Click/tap-to-focus: recenters the view on whatever's under the cursor by
-// panning the target there - which physically moves the camera to sit over
-// the new point, since camera position is always target + a fixed offset.
-// Animated (see the update loop below) instead of snapping instantly.
-const focusOnPoint = point => {
-  focusAnim.startTarget.copy(target);
-  focusAnim.endTarget.copy(point);
-  focusAnim.startTime = performance.now();
-  focusAnim.active = true;
-};
-
-// A click/tap drops the marker immediately (visible confirmation it
-// registered) but waits CLICK_FOCUS_DELAY_MS before the camera actually
-// starts moving - a beat to "notice" the spot before "walking" over to it,
-// and a small debounce window if more clicks follow right away.
-const CLICK_FOCUS_DELAY_MS = 250;
-const pendingFocusPoint = new Vec3();
-let pendingFocusTimer = null;
-
-function cancelPendingFocus() {
-  if (pendingFocusTimer !== null) {
-    clearTimeout(pendingFocusTimer);
-    pendingFocusTimer = null;
-  }
-}
-
-const handleClickAt = (screenX, screenY) => {
-  updateBasis();
-  // The view-plane intersection gives a good X/Z estimate of what's under
-  // the cursor, but its Y is just wherever that plane happens to sit - not
-  // the real terrain height. Override it with the actual substrate surface
-  // height at that X/Z (if voxel data is available) so the marker sits on
-  // the reef instead of floating at a uniform, click-location-independent
-  // elevation.
-  const clickedPoint = screenToViewPlanePoint(screenX, screenY, rayHitPrev);
-  if (!clickedPoint) return;
-
-  const surfaceY = getSurfaceElevation(clickedPoint.x, clickedPoint.z);
-  if (surfaceY !== null) clickedPoint.y = surfaceY;
-
-  showClickMarkerAt(clickedPoint);
-
-  cancelPendingFocus();
-  pendingFocusPoint.copy(clickedPoint);
-  pendingFocusTimer = setTimeout(() => {
-    pendingFocusTimer = null;
-    focusOnPoint(pendingFocusPoint);
-  }, CLICK_FOCUS_DELAY_MS);
-};
-
-const orbitDrag = (deltaX, deltaY) => {
-  yaw -= deltaX * ORBIT_SENSITIVITY;
-  pitch = clampPitch(pitch + deltaY * ORBIT_SENSITIVITY);
-  updateCamera();
-};
-
-function touchCenterAndDist() {
-  const [a, b] = Array.from(activePointers.values());
-  return {
-    cx: (a.x + b.x) / 2,
-    cy: (a.y + b.y) / 2,
-    dist: Math.hypot(a.x - b.x, a.y - b.y)
-  };
-}
-
 canvas.addEventListener("pointerdown", event => {
-  // A new gesture takes over from any in-flight (or still-pending) click-to-focus move.
-  focusAnim.active = false;
-  cancelPendingFocus();
-
   activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   try {
     canvas.setPointerCapture(event.pointerId);
@@ -942,10 +583,9 @@ canvas.addEventListener("pointerdown", event => {
       dragMode = "pan";
       lastPointerX = event.clientX;
       lastPointerY = event.clientY;
-      pointerDownInfo.set(event.pointerId, { x: event.clientX, y: event.clientY, time: performance.now() });
     } else if (activePointers.size === 2) {
       dragMode = "touch2";
-      const { cx, cy, dist } = touchCenterAndDist();
+      const { cx, cy, dist } = touchCenterAndDist(activePointers);
       touchCenterX = cx;
       touchCenterY = cy;
       pinchDist = dist;
@@ -956,9 +596,6 @@ canvas.addEventListener("pointerdown", event => {
     dragMode = event.button === 2 ? "orbit" : "pan";
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
-    if (dragMode === "pan") {
-      pointerDownInfo.set(event.pointerId, { x: event.clientX, y: event.clientY, time: performance.now() });
-    }
   }
 });
 
@@ -969,15 +606,14 @@ canvas.addEventListener("pointermove", event => {
   if (dragMode === "touch2") {
     if (activePointers.size !== 2) return;
 
-    const { cx, cy, dist } = touchCenterAndDist();
+    const { cx, cy, dist } = touchCenterAndDist(activePointers);
 
     // Two fingers moving together => orbit (mirrors right-click-drag).
-    orbitDrag(cx - touchCenterX, cy - touchCenterY);
+    appendOrbitRotate((cx - touchCenterX) * ORBIT_SENSITIVITY, (cy - touchCenterY) * ORBIT_SENSITIVITY);
 
-    // Fingers moving apart/together => pinch-zoom, centered on the
-    // pinch midpoint rather than the orbit target.
-    if (pinchDist > 0) {
-      zoomAtScreenPoint(cx, cy, pinchDist / dist);
+    // Fingers moving apart/together => pinch-zoom.
+    if (pinchDist > 0 && dist > 0) {
+      appendZoom(pinchDist / dist - 1);
     }
 
     touchCenterX = cx;
@@ -988,17 +624,15 @@ canvas.addEventListener("pointermove", event => {
 
   if (!dragMode) return;
 
-  const prevX = lastPointerX;
-  const prevY = lastPointerY;
-  const deltaX = event.clientX - prevX;
-  const deltaY = event.clientY - prevY;
+  const deltaX = event.clientX - lastPointerX;
+  const deltaY = event.clientY - lastPointerY;
   lastPointerX = event.clientX;
   lastPointerY = event.clientY;
 
   if (dragMode === "pan") {
-    panDrag(prevX, prevY, event.clientX, event.clientY);
+    planarPanDrag(deltaX, deltaY);
   } else if (dragMode === "orbit") {
-    orbitDrag(deltaX, deltaY);
+    appendOrbitRotate(deltaX * ORBIT_SENSITIVITY, deltaY * ORBIT_SENSITIVITY);
   }
 });
 
@@ -1009,9 +643,6 @@ const endPointerDrag = event => {
     canvas.releasePointerCapture(event.pointerId);
   }
 
-  const downInfo = pointerDownInfo.get(event.pointerId);
-  pointerDownInfo.delete(event.pointerId);
-
   if (activePointers.size === 0) {
     dragMode = null;
   } else if (activePointers.size === 1) {
@@ -1021,16 +652,6 @@ const endPointerDrag = event => {
     dragMode = "pan";
     lastPointerX = pos.x;
     lastPointerY = pos.y;
-  }
-
-  if (downInfo) {
-    const heldMs = performance.now() - downInfo.time;
-    const movedPx = Math.hypot(event.clientX - downInfo.x, event.clientY - downInfo.y);
-
-    // A click/tap that didn't turn into a real drag - recenter on it.
-    if (heldMs < TAP_MAX_DURATION_MS && movedPx < TAP_MAX_MOVEMENT_PX) {
-      handleClickAt(event.clientX, event.clientY);
-    }
   }
 };
 
@@ -1044,19 +665,17 @@ canvas.addEventListener(
     event.preventDefault();
 
     if (event.shiftKey) {
-      panDrag(event.clientX - event.deltaX, event.clientY - event.deltaY, event.clientX, event.clientY);
+      planarPanDrag(event.deltaX, event.deltaY);
       return;
     }
 
     if (event.ctrlKey && isControlKeyDown) {
-      yaw -= event.deltaX * TRACKPAD_ORBIT_SENSITIVITY;
-      pitch = clampPitch(pitch + event.deltaY * TRACKPAD_ORBIT_SENSITIVITY);
-      updateCamera();
+      appendOrbitRotate(event.deltaX * TRACKPAD_ORBIT_SENSITIVITY, event.deltaY * TRACKPAD_ORBIT_SENSITIVITY);
       return;
     }
 
     const zoomSpeed = event.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
-    zoomAtScreenPoint(event.clientX, event.clientY, 1 + event.deltaY * zoomSpeed);
+    appendZoom(event.deltaY * zoomSpeed);
   },
   { passive: false }
 );
@@ -1095,7 +714,7 @@ app.on("update", dt => {
     Number(pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown"));
 
   if (strafe !== 0 || advance !== 0) {
-    updateBasis();
+    updateFlatBasis();
 
     desiredMove.addScaled(right, strafe).addScaled(flatForward, advance);
 
@@ -1119,27 +738,16 @@ app.on("update", dt => {
     flyVelocity.set(0, 0, 0);
   }
 
-  if (flyVelocity.lengthSq() === 0) return;
+  if (flyVelocity.lengthSq() > 0) {
+    move.copy(flyVelocity).mulScalar(dt);
+    translateCamera(move);
+  }
 
-  move.copy(flyVelocity).mulScalar(dt);
-  target.add(move);
-  updateCamera();
-});
-
-// Eases the click/tap-to-focus target shift in over FOCUS_ANIM_DURATION_MS
-// instead of snapping, so it reads as a deliberate pan toward the clicked
-// point rather than a cut. yaw/pitch/distance are untouched throughout.
-app.on("update", () => {
-  if (!focusAnim.active) return;
-
-  const elapsed = performance.now() - focusAnim.startTime;
-  const t = Math.min(1, elapsed / FOCUS_ANIM_DURATION_MS);
-  const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
-
-  target.lerp(focusAnim.startTarget, focusAnim.endTarget, eased);
-  updateCamera();
-
-  if (t >= 1) focusAnim.active = false;
+  // Orbit (right-drag/two-finger) and zoom (wheel/pinch) deltas accumulated
+  // since last frame get processed and folded into the pose here.
+  pose.copy(orbitController.update(inputFrame, dt));
+  cameraRig.setPosition(pose.position);
+  cameraRig.setEulerAngles(pose.angles);
 });
 
 setDefaultFrame();
@@ -1190,9 +798,9 @@ if (vrButton) {
 // --------------------------------------------------
 // Splat loading + timepoint swapping
 //
-// Camera state (yaw/pitch/distance/target/fov) is never touched by which
-// splat is loaded, so swapping timepoints naturally preserves the viewpoint.
-// It's only reset (via applyCameraPose/frameSplat) on the very first load.
+// Camera state (pose/fov) is never touched by which splat is loaded, so
+// swapping timepoints naturally preserves the viewpoint. It's only reset
+// (via applyCameraPose/frameSplat) on the very first load.
 // --------------------------------------------------
 
 // --------------------------------------------------
@@ -1309,6 +917,7 @@ function loadTimepoint(url) {
     const aabb = resource?.aabb;
     if (aabb) {
       sceneRadius = Math.max(aabb.halfExtents.length(), MIN_SCENE_RADIUS);
+      updateZoomRange();
     }
 
     if (!hasLoadedOnce) {
@@ -1341,16 +950,15 @@ select.addEventListener("change", () => {
 loadTimepoint(splats[years[0]]);
 
 window.__debug = {
-  getYaw: () => yaw,
-  getPitch: () => pitch,
-  getDistance: () => distance,
-  getTarget: () => target.clone(),
-  getCameraPosition: () => cameraPosition.clone(),
+  getYaw: () => pose.angles.y,
+  getPitch: () => -pose.angles.x,
+  getDistance: () => pose.distance,
+  getTarget: () => pose.getFocus(new Vec3()),
+  getCameraPosition: () => pose.position.clone(),
   isSolidAtWorld: (x, y, z) => {
     const p = worldToVoxelSpace(new Vec3(x, y, z));
     return voxelOctree ? voxelOctree.isSolid(p.x, p.y, p.z) : null;
-  },
-  getSurfaceElevation: (x, z) => getSurfaceElevation(x, z)
+  }
 };
 
 app.on("update", () => {
