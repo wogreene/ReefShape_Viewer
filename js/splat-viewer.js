@@ -33,6 +33,8 @@ import {
   DEVICETYPE_WEBGL2,
   XRTYPE_VR,
   XRSPACE_LOCALFLOOR,
+  PROJECTION_ORTHOGRAPHIC,
+  PROJECTION_PERSPECTIVE,
   createGraphicsDevice
 } from "https://cdn.jsdelivr.net/npm/playcanvas@2.20.0/+esm";
 
@@ -395,6 +397,14 @@ const MIN_PITCH = 30; // can't tilt further toward the horizon than this
 const MAX_PITCH = 90; // straight down
 const MIN_SCENE_RADIUS = 0.5;
 
+// 2D ("photomosaic") mode: straight-down orthographic view. Unlike the free
+// perspective dolly, ortho projection makes apparent size independent of
+// camera height, so "zoom" there directly resizes the view frustum
+// (orthoHeight) instead of moving the camera - which also gives it a natural
+// hard zoom limit in both directions, unlike the perspective dolly.
+const ORTHO_HEIGHT_MIN_FACTOR = 0.02; // relative to sceneRadius
+const ORTHO_HEIGHT_MAX_FACTOR = 3;
+
 const orbitController = new OrbitController();
 // Pose applies rotation as Euler angles where angles.x is the *negative* of
 // the "pitch" used everywhere else in this file (see Pose.look/getFocus in
@@ -414,6 +424,8 @@ let fov = DEFAULT_FOV;
 let sceneRadius = 1;
 let isControlKeyDown = false;
 let hasLoadedOnce = false;
+let is2DMode = false;
+let orthoHeight = null; // lazily initialized to sceneRadius on first entry into 2D mode
 
 const right = new Vec3();
 const flatForward = new Vec3();
@@ -568,6 +580,7 @@ const setDefaultFrame = () => {
 
 const posePosition = new Vec3();
 const poseTarget = new Vec3();
+const twoDPosition = new Vec3();
 const applyCameraPose = authoredPose => {
   posePosition.set(...authoredPose.position);
   poseTarget.set(...authoredPose.target);
@@ -609,6 +622,45 @@ const frameSplat = (splat, aabb) => {
 
 function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {
   inputFrame.deltas.rotate.append([yawDeltaDeg, pitchDeltaDeg, 0]);
+}
+
+// Straight-down orthographic "photomosaic" mode. Keeps the current XZ
+// position and yaw so toggling doesn't reframe the view, only what you can
+// do with it: pitch gets locked at -90 (straight down) by pinning
+// pitchRange to a zero-width range at that value - Pose.rotate (which
+// OrbitController.update calls for right-drag/two-finger orbit input) clamps
+// into that range every time, so no amount of vertical drag can move it.
+// Camera height above the ground is set once here (reusing the same
+// distance the perspective framing already uses) and then left alone -
+// under orthographic projection it has no effect on apparent scale, unlike
+// perspective where it's the whole basis for zoom.
+function enter2DMode() {
+  if (is2DMode) return;
+  is2DMode = true;
+
+  if (orthoHeight === null) orthoHeight = sceneRadius;
+
+  const height = getFrameDistance(sceneRadius);
+  twoDPosition.set(pose.position.x, zoomTarget.y + height, pose.position.z);
+  setPose(twoDPosition, new Vec3(-MAX_PITCH, pose.angles.y, 0), height);
+  orbitController.pitchRange = new Vec2(-MAX_PITCH, -MAX_PITCH);
+
+  if (camera.camera) {
+    camera.camera.projection = PROJECTION_ORTHOGRAPHIC;
+    camera.camera.orthoHeight = orthoHeight;
+  }
+}
+
+function exit2DMode() {
+  if (!is2DMode) return;
+  is2DMode = false;
+
+  orbitController.pitchRange = new Vec2(-MAX_PITCH, -MIN_PITCH);
+
+  if (camera.camera) {
+    camera.camera.projection = PROJECTION_PERSPECTIVE;
+    camera.camera.fov = fov;
+  }
 }
 
 // Full (non-flattened) view-direction vector, derived from the current pose
@@ -666,20 +718,32 @@ function zoomByFactor(factor) {
   dollyCamera(currentViewDistance() * (1 - factor));
 }
 
+// 2D mode's zoom: no camera movement at all (see enter2DMode) - just resizes
+// the orthographic frustum, clamped so you can't zoom in/out indefinitely.
+function zoomOrthoByFactor(factor) {
+  const min = sceneRadius * ORTHO_HEIGHT_MIN_FACTOR;
+  const max = sceneRadius * ORTHO_HEIGHT_MAX_FACTOR;
+  orthoHeight = Math.max(min, Math.min(max, orthoHeight * factor));
+  if (camera.camera) camera.camera.orthoHeight = orthoHeight;
+}
+
 // "Grab and drag" planar pan: the point on the flat plane under the cursor
 // at the start of a move stays pinned under the cursor at the end of it, at
-// any zoom level - scaled by the camera's current distance to zoomTarget,
-// not pose.distance (the orbit arm length, which zoom never touches - see
-// dollyCamera above). Using pose.distance here was the original bug: it
-// stayed frozen at whatever it started at, so pan always moved at that one
-// fixed scale regardless of how far you'd actually zoomed.
+// any zoom level - scaled by the camera's current distance to zoomTarget
+// (or, in 2D mode, by orthoHeight directly - the true world-space half-
+// height of the view, independent of camera distance under orthographic
+// projection), not pose.distance (the orbit arm length, which zoom never
+// touches - see dollyCamera above). Using pose.distance here was the
+// original bug: it stayed frozen at whatever it started at, so pan always
+// moved at that one fixed scale regardless of how far you'd actually
+// zoomed.
 const panDelta = new Vec3();
 function planarPanDrag(deltaX, deltaY) {
   updateFlatBasis();
 
   const width = canvas.clientWidth || window.innerWidth;
   const height = canvas.clientHeight || window.innerHeight;
-  const halfHeight = currentViewDistance() * Math.tan((fov * Math.PI) / 360);
+  const halfHeight = is2DMode ? orthoHeight : currentViewDistance() * Math.tan((fov * Math.PI) / 360);
   const halfWidth = halfHeight * (width / height);
 
   panDelta
@@ -752,9 +816,14 @@ canvas.addEventListener("pointermove", event => {
     // Two fingers moving together => orbit (mirrors right-click-drag).
     appendOrbitRotate((cx - touchCenterX) * ORBIT_SENSITIVITY, (cy - touchCenterY) * ORBIT_SENSITIVITY);
 
-    // Fingers moving apart/together => pinch-zoom (dolly forward/back).
+    // Fingers moving apart/together => pinch-zoom (dolly forward/back, or
+    // resize the frustum in 2D mode).
     if (pinchDist > 0 && dist > 0) {
-      zoomByFactor(pinchDist / dist);
+      if (is2DMode) {
+        zoomOrthoByFactor(pinchDist / dist);
+      } else {
+        zoomByFactor(pinchDist / dist);
+      }
     }
 
     touchCenterX = cx;
@@ -816,7 +885,12 @@ canvas.addEventListener(
     }
 
     const zoomSpeed = event.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
-    zoomByFactor(1 + event.deltaY * zoomSpeed);
+    const factor = 1 + event.deltaY * zoomSpeed;
+    if (is2DMode) {
+      zoomOrthoByFactor(factor);
+    } else {
+      zoomByFactor(factor);
+    }
   },
   { passive: false }
 );
@@ -855,7 +929,11 @@ app.on("update", dt => {
     Number(pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown"));
   // Straight world-Y lift, complementing WASD's flat glide - E surfaces,
   // Q dives, so between the two the camera can reach anywhere in full 3D.
-  const lift = Number(pressedKeys.has("KeyE")) - Number(pressedKeys.has("KeyQ"));
+  // Meaningless in 2D mode (camera height has no effect under orthographic
+  // projection, and pitch is locked straight down anyway), so it's a no-op
+  // there rather than silently moving the camera somewhere the view can't
+  // show.
+  const lift = is2DMode ? 0 : Number(pressedKeys.has("KeyE")) - Number(pressedKeys.has("KeyQ"));
 
   if (strafe !== 0 || advance !== 0 || lift !== 0) {
     updateFlatBasis();
@@ -871,7 +949,10 @@ app.on("update", dt => {
             ? 0.25
             : 1;
 
-      desiredMove.normalize().mulScalar(MOVE_SPEED * speedMultiplier);
+      // In 2D mode, scale glide speed by orthoHeight the same way pan
+      // already does - otherwise a fixed world-space speed would crawl when
+      // zoomed in tight and blow past the reef when zoomed out.
+      desiredMove.normalize().mulScalar(MOVE_SPEED * speedMultiplier * (is2DMode ? orthoHeight : 1));
     }
   }
 
@@ -896,6 +977,19 @@ app.on("update", dt => {
 });
 
 setDefaultFrame();
+
+const modeToggleButton = document.getElementById("modeToggleButton");
+if (modeToggleButton) {
+  modeToggleButton.addEventListener("click", () => {
+    if (is2DMode) {
+      exit2DMode();
+      modeToggleButton.textContent = "2D";
+    } else {
+      enter2DMode();
+      modeToggleButton.textContent = "3D";
+    }
+  });
+}
 
 // --------------------------------------------------
 // VR (WebXR)
@@ -1104,7 +1198,10 @@ window.__debug = {
   isSolidAtWorld: (x, y, z) => {
     const p = worldToVoxelSpace(new Vec3(x, y, z));
     return voxelOctree ? voxelOctree.isSolid(p.x, p.y, p.z) : null;
-  }
+  },
+  is2DMode: () => is2DMode,
+  getOrthoHeight: () => orthoHeight,
+  getProjection: () => camera.camera && camera.camera.projection
 };
 
 app.on("update", () => {
