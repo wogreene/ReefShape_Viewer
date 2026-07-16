@@ -31,6 +31,11 @@ import {
   FILLMODE_FILL_WINDOW,
   RESOLUTION_AUTO,
   Vec3,
+  Mesh,
+  MeshInstance,
+  ShaderMaterial,
+  SEMANTIC_POSITION,
+  CULLFACE_NONE,
   DEVICETYPE_WEBGPU,
   DEVICETYPE_WEBGL2,
   XRTYPE_VR,
@@ -211,6 +216,96 @@ camera.addComponent("camera", {
   fov: 75
 });
 cameraRig.addChild(camera);
+
+// --------------------------------------------------
+// Click/tap-to-focus marker
+//
+// A small flat white disc dropped at the clicked/tapped point, visible the
+// moment the click registers (well before the camera actually starts
+// moving) so the interaction reads as "yes, that landed" - and left in
+// place until the next click, as a lightweight breadcrumb of what's
+// currently focused.
+// --------------------------------------------------
+
+const MARKER_SEGMENTS = 24;
+const MARKER_SCREEN_RADIUS_FACTOR = 0.02; // fraction of camera distance
+
+function createClickMarker() {
+  const positions = [0, 0, 0];
+  const indices = [];
+  for (let i = 0; i <= MARKER_SEGMENTS; i++) {
+    const angle = (i / MARKER_SEGMENTS) * Math.PI * 2;
+    positions.push(Math.cos(angle), 0, Math.sin(angle));
+    if (i > 0) indices.push(0, i, i + 1);
+  }
+
+  const mesh = new Mesh(device);
+  mesh.setPositions(positions);
+  mesh.setIndices(indices);
+  mesh.update();
+
+  const material = new ShaderMaterial({
+    uniqueName: "ClickMarker",
+    attributes: { aPosition: SEMANTIC_POSITION },
+    vertexGLSL: `
+      attribute vec3 aPosition;
+      uniform mat4 matrix_model;
+      uniform mat4 matrix_viewProjection;
+      varying vec3 vPos;
+      void main(void) {
+        vPos = aPosition;
+        gl_Position = matrix_viewProjection * matrix_model * vec4(aPosition, 1.0);
+      }
+    `,
+    fragmentGLSL: `
+      precision mediump float;
+      varying vec3 vPos;
+      void main(void) {
+        gl_FragColor = vec4(vec3(1.0), 1.0) * (vPos.x * 0.0 + 1.0);
+      }
+    `,
+    vertexWGSL: `
+      attribute aPosition: vec3f;
+      uniform matrix_model: mat4x4f;
+      uniform matrix_viewProjection: mat4x4f;
+      varying vPos: vec3f;
+      @vertex fn vertexMain(input: VertexInput) -> VertexOutput {
+        var output: VertexOutput;
+        output.vPos = input.aPosition;
+        output.position = uniform.matrix_viewProjection * uniform.matrix_model * vec4f(input.aPosition, 1.0);
+        return output;
+      }
+    `,
+    fragmentWGSL: `
+      varying vPos: vec3f;
+      @fragment fn fragmentMain(input: FragmentInput) -> FragmentOutput {
+        var output: FragmentOutput;
+        output.color = vec4f(vec3f(1.0), 1.0) * (input.vPos.x * 0.0 + 1.0);
+        return output;
+      }
+    `
+  });
+  material.cull = CULLFACE_NONE;
+
+  const meshInstance = new MeshInstance(mesh, material);
+  const entity = new Entity("ClickMarker");
+  entity.addComponent("render", { meshInstances: [meshInstance] });
+  entity.enabled = false;
+  app.root.addChild(entity);
+  return entity;
+}
+
+const clickMarker = createClickMarker();
+
+// Sized relative to the camera's current distance rather than a fixed world
+// size, so it reads as roughly the same on-screen size whether you're
+// zoomed in tight or framing the whole reef.
+function showClickMarkerAt(point) {
+  const radius = Math.max(distance * MARKER_SCREEN_RADIUS_FACTOR, 0.001);
+  clickMarker.setLocalScale(radius, 1, radius);
+  clickMarker.setPosition(point.x, point.y + 0.001, point.z);
+  clickMarker.enabled = true;
+}
 
 // --------------------------------------------------
 // Collision voxels
@@ -717,26 +812,52 @@ const zoomAtScreenPoint = (screenX, screenY, factor) => {
 // spotting something off to the side and walking over for a better look,
 // rather than sliding sideways at a fixed bearing and distance. Animated
 // (see the update loop below) instead of snapping instantly.
-const focusOnScreenPoint = (screenX, screenY) => {
-  updateBasis();
-  const groundPoint = screenToGroundPoint(screenX, screenY, target.y, rayHitPrev);
-  if (!groundPoint) return;
-
-  const dx = groundPoint.x - target.x;
-  const dz = groundPoint.z - target.z;
+const focusOnPoint = point => {
+  const dx = point.x - target.x;
+  const dz = point.z - target.z;
   // Only turn if the click is far enough away to have a meaningful travel
   // direction - right on top of the current target, atan2(0, 0) is
   // meaningless noise, not a heading to turn toward.
   const travelYaw = dx * dx + dz * dz > 1e-8 ? (Math.atan2(dx, dz) * 180) / Math.PI : yaw;
 
   focusAnim.startTarget.copy(target);
-  focusAnim.endTarget.copy(groundPoint);
+  focusAnim.endTarget.copy(point);
   focusAnim.startYaw = yaw;
   focusAnim.endYaw = yaw + shortestAngleDelta(yaw, travelYaw) * FOCUS_ANIM_TURN_FRACTION;
   focusAnim.startDistance = distance;
   focusAnim.endDistance = clampDistance(distance * FOCUS_ANIM_DISTANCE_FACTOR);
   focusAnim.startTime = performance.now();
   focusAnim.active = true;
+};
+
+// A click/tap drops the marker immediately (visible confirmation it
+// registered) but waits CLICK_FOCUS_DELAY_MS before the camera actually
+// starts moving - a beat to "notice" the spot before "walking" over to it,
+// and a small debounce window if more clicks follow right away.
+const CLICK_FOCUS_DELAY_MS = 250;
+const pendingFocusPoint = new Vec3();
+let pendingFocusTimer = null;
+
+function cancelPendingFocus() {
+  if (pendingFocusTimer !== null) {
+    clearTimeout(pendingFocusTimer);
+    pendingFocusTimer = null;
+  }
+}
+
+const handleClickAt = (screenX, screenY) => {
+  updateBasis();
+  const groundPoint = screenToGroundPoint(screenX, screenY, target.y, rayHitPrev);
+  if (!groundPoint) return;
+
+  showClickMarkerAt(groundPoint);
+
+  cancelPendingFocus();
+  pendingFocusPoint.copy(groundPoint);
+  pendingFocusTimer = setTimeout(() => {
+    pendingFocusTimer = null;
+    focusOnPoint(pendingFocusPoint);
+  }, CLICK_FOCUS_DELAY_MS);
 };
 
 const orbitDrag = (deltaX, deltaY) => {
@@ -755,8 +876,9 @@ function touchCenterAndDist() {
 }
 
 canvas.addEventListener("pointerdown", event => {
-  // A new gesture takes over from any in-flight click-to-focus animation.
+  // A new gesture takes over from any in-flight (or still-pending) click-to-focus move.
   focusAnim.active = false;
+  cancelPendingFocus();
 
   activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   try {
@@ -858,7 +980,7 @@ const endPointerDrag = event => {
 
     // A click/tap that didn't turn into a real drag - recenter on it.
     if (heldMs < TAP_MAX_DURATION_MS && movedPx < TAP_MAX_MOVEMENT_PX) {
-      focusOnScreenPoint(event.clientX, event.clientY);
+      handleClickAt(event.clientX, event.clientY);
     }
   }
 };
