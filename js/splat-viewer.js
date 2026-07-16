@@ -303,10 +303,16 @@ class VoxelOctree {
   }
 }
 
-// Collision enforcement against this data is disabled for now (see the
-// camera controller below) - it was getting in the way of navigating the
-// reef more than it was helping. The data is still loaded here so it's
-// available for isSolidAtWorld debugging and easy to wire back up later.
+// Collision enforcement was disabled for a while - before the camera could
+// dolly through full 3D space (see dollyCamera below), collision was the
+// only thing standing between "zoom" and just phasing through the reef, and
+// the two fought each other more than they helped. Now that zoom is a real
+// translation instead of a distance-to-a-fixed-point shrink, collision goes
+// back to its actual job: stopping the camera from flying into solid reef
+// while dollying, panning, strafing, or moving vertically (see
+// translateCamera's use of isBlockedAt below).
+const ENABLE_VOXEL_COLLISION = true;
+
 let voxelOctree = null;
 const voxelQueryPoint = new Vec3();
 
@@ -316,6 +322,12 @@ const voxelQueryPoint = new Vec3();
 function worldToVoxelSpace(worldPoint) {
   voxelQueryPoint.set(-worldPoint.x, -worldPoint.y, worldPoint.z);
   return voxelQueryPoint;
+}
+
+function isBlockedAt(position) {
+  if (!ENABLE_VOXEL_COLLISION || !voxelOctree) return false;
+  const p = worldToVoxelSpace(position);
+  return voxelOctree.isSolid(p.x, p.y, p.z);
 }
 
 if (voxelCollision) {
@@ -359,9 +371,11 @@ if (voxelCollision) {
 // both move the camera across the *flat* horizontal plane (ignoring pitch
 // tilt), driven by key state for WASD and directly by drag distance for
 // the mouse/touch version, so lateral movement always glides across the
-// reef surface instead of dollying toward/away from it. Vertical movement
-// is zoom's job (see above), keeping the two controls from fighting each
-// other.
+// reef surface instead of dollying toward/away from it. Q/E move straight
+// along world Y (dive/surface) to complement that plane, so between the
+// two, the camera can reach anywhere in full 3D like a diver swimming
+// through open water - planar glide, vertical lift, and forward/back dolly
+// (zoom) each cover one axis without fighting the others.
 //
 // The pitch clamp's default range (30-90 degrees, 90 = straight down) is
 // also project-specific, set via OrbitController's pitchRange rather than
@@ -466,9 +480,48 @@ function updateFlatBasis() {
 // touching angles or distance. Re-seeding the controller like this (rather
 // than reaching into its private state) is the same pattern PlayCanvas's
 // own camera-controls.mjs script uses for its focus/reset/look methods.
+//
+// Collision: if the straight offset would put the camera inside solid
+// reef, try sliding along just one world axis at a time (keeping the
+// others at their last-good value) before giving up entirely - grazing a
+// wall should let you slide along it, not stonewall the whole gesture.
+// `skipCollision` exists for backing away (zoom-out, see dollyCamera):
+// the voxel data is a flood fill from a seed point in open water, so
+// "solid" also covers the region beyond the fill entirely (including
+// above the actual water surface, since the fill has nowhere to go once
+// it reaches the top of the captured volume) - pulling back to frame the
+// whole reef can legitimately cross that boundary, so it's exempted the
+// same way getting closer is the only case collision needs to stop.
 const movedPose = new Pose();
-function translateCamera(offset) {
-  movedPose.position.copy(pose.position).add(offset);
+const candidatePosition = new Vec3();
+const slideCandidate = new Vec3();
+function translateCamera(offset, { skipCollision = false } = {}) {
+  candidatePosition.copy(pose.position).add(offset);
+
+  if (!skipCollision && isBlockedAt(candidatePosition)) {
+    const base = pose.position;
+    let resolved = null;
+
+    // Try each axis independently, skipping axes the offset doesn't actually move
+    // along - a zero-offset axis's "slide" candidate is just the base position,
+    // which is trivially open and would otherwise mask a genuine slide on another axis.
+    if (offset.x !== 0) {
+      slideCandidate.set(base.x + offset.x, base.y, base.z);
+      if (!isBlockedAt(slideCandidate)) resolved = slideCandidate;
+    }
+    if (!resolved && offset.y !== 0) {
+      slideCandidate.set(base.x, base.y + offset.y, base.z);
+      if (!isBlockedAt(slideCandidate)) resolved = slideCandidate;
+    }
+    if (!resolved && offset.z !== 0) {
+      slideCandidate.set(base.x, base.y, base.z + offset.z);
+      if (!isBlockedAt(slideCandidate)) resolved = slideCandidate;
+    }
+
+    candidatePosition.copy(resolved || base);
+  }
+
+  movedPose.position.copy(candidatePosition);
   movedPose.angles.copy(pose.angles);
   movedPose.distance = pose.distance;
   orbitController.attach(movedPose, false);
@@ -502,6 +555,7 @@ const setDefaultFrame = () => {
   const distance = clampDistance(getFrameDistance(sceneRadius));
   const position = positionFromOrbit(Vec3.ZERO, -45, MAX_PITCH, distance, sphericalPosition);
   setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
+  viewDistance = distance;
 };
 
 const posePosition = new Vec3();
@@ -524,6 +578,7 @@ const applyCameraPose = authoredPose => {
   if (camera.camera) camera.camera.fov = fov;
 
   setPose(pose.position, new Vec3(clampedPitch, pose.angles.y, 0), pose.distance);
+  viewDistance = pose.distance;
   return true;
 };
 
@@ -541,6 +596,7 @@ const frameSplat = (splat, aabb) => {
   const distance = clampDistance(getFrameDistance(sceneRadius));
   const position = positionFromOrbit(target, -45, MAX_PITCH, distance, sphericalPosition);
   setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
+  viewDistance = distance;
 };
 
 function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {
@@ -571,28 +627,46 @@ function updateViewForward() {
 // same way a diver swims toward whatever they're looking at rather than
 // orbiting a fixed point above the reef.
 //
-// Scaled by the current distance (same as the old distance-shrink formula)
-// so it still feels proportional - fast when far out, fine control up
-// close - even though it's now an absolute translation instead of a
-// multiplicative shrink.
+// Backing away (amount < 0) is exempted from collision - see translateCamera.
 const dollyDelta = new Vec3();
 function dollyCamera(amount) {
   updateViewForward();
   dollyDelta.copy(viewForward).mulScalar(amount);
-  translateCamera(dollyDelta);
+  translateCamera(dollyDelta, { skipCollision: amount < 0 });
+}
+
+// Tracks "how zoomed in" the camera currently is, independent of the orbit
+// controller's own `distance` (the fixed arm length used only for right-
+// drag orbit, which dollying never touches - see dollyCamera/translateCamera
+// above). Pan and dolly speed both scale off *this* instead, so a drag
+// still feels 1:1 - the point under the cursor stays under the cursor -
+// no matter how far you've zoomed, rather than always scaling as if the
+// camera were still at its starting distance.
+let viewDistance = 1;
+
+// Applies a multiplicative zoom factor (< 1 = zooming in) as a forward/back
+// dolly of the equivalent absolute distance, and updates viewDistance by
+// the same factor so pan/future zoom stay scaled to the new depth.
+function zoomByFactor(factor) {
+  dollyCamera(viewDistance * (1 - factor));
+  viewDistance = Math.max(0.001, Math.min(maxZoomDistance, viewDistance * factor));
 }
 
 // "Grab and drag" planar pan: the point on the flat plane under the cursor
 // at the start of a move stays pinned under the cursor at the end of it, at
-// any zoom level, since halfWidth/halfHeight scale with the camera's actual
-// current distance.
+// any zoom level - scaled by viewDistance (how far dollyCamera has actually
+// brought the camera in), not pose.distance (the orbit arm length, which
+// zoom no longer touches at all - see dollyCamera/viewDistance above). Using
+// pose.distance here was the bug: it stayed frozen at whatever it started
+// at, so pan always moved at that one fixed scale regardless of how far
+// you'd actually zoomed - too slow zoomed out, too fast zoomed in.
 const panDelta = new Vec3();
 function planarPanDrag(deltaX, deltaY) {
   updateFlatBasis();
 
   const width = canvas.clientWidth || window.innerWidth;
   const height = canvas.clientHeight || window.innerHeight;
-  const halfHeight = pose.distance * Math.tan((fov * Math.PI) / 360);
+  const halfHeight = viewDistance * Math.tan((fov * Math.PI) / 360);
   const halfWidth = halfHeight * (width / height);
 
   panDelta
@@ -667,7 +741,7 @@ canvas.addEventListener("pointermove", event => {
 
     // Fingers moving apart/together => pinch-zoom (dolly forward/back).
     if (pinchDist > 0 && dist > 0) {
-      dollyCamera(pose.distance * (1 - pinchDist / dist));
+      zoomByFactor(pinchDist / dist);
     }
 
     touchCenterX = cx;
@@ -729,7 +803,7 @@ canvas.addEventListener(
     }
 
     const zoomSpeed = event.ctrlKey ? PINCH_ZOOM_SPEED : WHEEL_ZOOM_SPEED;
-    dollyCamera(-pose.distance * event.deltaY * zoomSpeed);
+    zoomByFactor(1 + event.deltaY * zoomSpeed);
   },
   { passive: false }
 );
@@ -766,11 +840,15 @@ app.on("update", dt => {
   const advance =
     Number(pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp")) -
     Number(pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown"));
+  // Straight world-Y lift, complementing WASD's flat glide - E surfaces,
+  // Q dives, so between the two the camera can reach anywhere in full 3D.
+  const lift = Number(pressedKeys.has("KeyE")) - Number(pressedKeys.has("KeyQ"));
 
-  if (strafe !== 0 || advance !== 0) {
+  if (strafe !== 0 || advance !== 0 || lift !== 0) {
     updateFlatBasis();
 
     desiredMove.addScaled(right, strafe).addScaled(flatForward, advance);
+    desiredMove.y += lift;
 
     if (desiredMove.lengthSq() > 0) {
       const speedMultiplier =
@@ -1007,6 +1085,7 @@ window.__debug = {
   getYaw: () => pose.angles.y,
   getPitch: () => -pose.angles.x,
   getDistance: () => pose.distance,
+  getViewDistance: () => viewDistance,
   getTarget: () => pose.getFocus(new Vec3()),
   getCameraPosition: () => pose.position.clone(),
   isSolidAtWorld: (x, y, z) => {
