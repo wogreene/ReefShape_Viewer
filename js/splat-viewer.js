@@ -37,6 +37,10 @@ import {
   PROJECTION_PERSPECTIVE,
   StandardMaterial,
   Picker,
+  TorusGeometry,
+  Mesh,
+  MeshInstance,
+  BLEND_ADDITIVE,
   createGraphicsDevice
 } from "https://cdn.jsdelivr.net/npm/playcanvas@2.20.0/+esm";
 
@@ -223,24 +227,34 @@ cameraRig.addChild(camera);
 // only material since this scene has no light components registered - an
 // ordinary lit material would render solid black without one.
 const clickMarker = new Entity("ClickMarker");
-clickMarker.addComponent("render", { type: "torus", castShadows: false, receiveShadows: false });
+// A thin ring rather than the primitive "torus" shape's default fat donut
+// proportions (tubeRadius 0.2 vs ringRadius 0.3) - custom geometry is the
+// only way to get that ratio, since the render component's primitive
+// 'torus' type doesn't expose tube/ring radius as configurable options.
+const clickMarkerGeometry = new TorusGeometry({ ringRadius: 1, tubeRadius: 0.06, segments: 48, sides: 16 });
+const clickMarkerMesh = Mesh.fromGeometry(app.graphicsDevice, clickMarkerGeometry);
+const clickMarkerMaterial = new StandardMaterial();
+clickMarkerMaterial.emissive = new Color(1, 1, 1);
+clickMarkerMaterial.emissiveIntensity = 4;
+clickMarkerMaterial.diffuse = new Color(0, 0, 0);
+// No light components exist in this scene at all, so a normally-lit
+// material would render solid black - useLighting: false makes emissive
+// the sole color source, independent of scene lighting. Additive blending
+// (rather than opaque) gives it a soft glowing look instead of a flat disc.
+clickMarkerMaterial.useLighting = false;
+clickMarkerMaterial.blendType = BLEND_ADDITIVE;
+clickMarkerMaterial.depthWrite = false;
+clickMarkerMaterial.update();
+
+const clickMarkerMeshInstance = new MeshInstance(clickMarkerMesh, clickMarkerMaterial);
+clickMarkerMeshInstance.pick = false; // never let the marker itself be the click-to-center hit
+clickMarker.addComponent("render", {
+  meshInstances: [clickMarkerMeshInstance],
+  castShadows: false,
+  receiveShadows: false
+});
 app.root.addChild(clickMarker);
 clickMarker.enabled = false;
-if (clickMarker.render) {
-  const clickMarkerMaterial = new StandardMaterial();
-  clickMarkerMaterial.emissive = new Color(1, 0.9, 0.3);
-  clickMarkerMaterial.emissiveIntensity = 3;
-  clickMarkerMaterial.diffuse = new Color(0, 0, 0);
-  // No light components exist in this scene at all, so a normally-lit
-  // material would render solid black - useLighting: false makes emissive
-  // the sole color source, independent of scene lighting.
-  clickMarkerMaterial.useLighting = false;
-  clickMarkerMaterial.update();
-  clickMarker.render.meshInstances.forEach(mi => {
-    mi.material = clickMarkerMaterial;
-    mi.pick = false; // never let the marker itself be the click-to-center hit
-  });
-}
 let clickMarkerHideTimer = null;
 
 // --------------------------------------------------
@@ -663,23 +677,48 @@ function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {
   inputFrame.deltas.rotate.append([yawDeltaDeg, pitchDeltaDeg, 0]);
 }
 
+// The engine's gsplat LOD system picks detail level from real world-space
+// camera-to-splat distance (scaled by perspective FOV - it doesn't know
+// about orthoHeight/projection mode at all), so a camera that never moves
+// during "zoom" - which is otherwise exactly right for orthographic framing,
+// since apparent scale there depends only on orthoHeight - would report the
+// same (large, fixed) distance forever and never stream in the higher-detail
+// LODs no matter how far you zoom in. Physically moving the camera closer
+// as orthoHeight shrinks fixes this with zero visual side effect under
+// orthographic projection (no perspective foreshortening to distort), while
+// giving the LOD system a real, shrinking distance to react to.
+function heightFor2DZoom(oh) {
+  return oh * 3;
+}
+
 // Straight-down orthographic "photomosaic" mode. Keeps the current XZ
 // position and yaw so toggling doesn't reframe the view, only what you can
 // do with it: pitch gets locked at -90 (straight down) by pinning
 // pitchRange to a zero-width range at that value - Pose.rotate (which
 // OrbitController.update calls for right-drag/two-finger orbit input) clamps
 // into that range every time, so no amount of vertical drag can move it.
-// Camera height above the ground is set once here (reusing the same
-// distance the perspective framing already uses) and then left alone -
-// under orthographic projection it has no effect on apparent scale, unlike
-// perspective where it's the whole basis for zoom.
+//
+// The full 3D pose is snapshotted here and restored on exit (see
+// exit2DMode) so toggling back and forth doesn't leave the camera stuck at
+// 2D's height, or jump-zoom the view - and orthoHeight is derived from the
+// current 3D viewDistance (not a fixed scene-radius default) so the 2D view
+// starts at roughly the same apparent zoom you were just looking at in 3D.
+const saved3DPose = new Pose();
+let has3DPoseSaved = false;
+
 function enter2DMode() {
   if (is2DMode) return;
   is2DMode = true;
 
-  if (orthoHeight === null) orthoHeight = sceneRadius;
+  saved3DPose.copy(pose);
+  has3DPoseSaved = true;
 
-  const height = getFrameDistance(sceneRadius);
+  orthoHeight = Math.max(
+    sceneRadius * ORTHO_HEIGHT_MIN_FACTOR,
+    Math.min(sceneRadius * ORTHO_HEIGHT_MAX_FACTOR, currentViewDistance())
+  );
+
+  const height = heightFor2DZoom(orthoHeight);
   twoDPosition.set(pose.position.x, zoomTarget.y + height, pose.position.z);
   setPose(twoDPosition, new Vec3(-MAX_PITCH, pose.angles.y, 0), height);
   orbitController.pitchRange = new Vec2(-MAX_PITCH, -MAX_PITCH);
@@ -705,6 +744,10 @@ function exit2DMode() {
   is2DMode = false;
 
   orbitController.pitchRange = new Vec2(-MAX_PITCH, -MIN_PITCH);
+
+  if (has3DPoseSaved) {
+    setPose(saved3DPose.position, saved3DPose.angles, saved3DPose.distance);
+  }
 
   if (camera.camera) {
     camera.camera.projection = PROJECTION_PERSPECTIVE;
@@ -779,6 +822,12 @@ function zoomOrthoByFactor(factor) {
   const max = sceneRadius * ORTHO_HEIGHT_MAX_FACTOR;
   orthoHeight = Math.max(min, Math.min(max, orthoHeight * factor));
   if (camera.camera) camera.camera.orthoHeight = orthoHeight;
+
+  // Move the camera closer/farther with it (see heightFor2DZoom) so the
+  // engine's distance-based LOD system actually sees zoom happening.
+  const height = heightFor2DZoom(orthoHeight);
+  twoDPosition.set(pose.position.x, zoomTarget.y + height, pose.position.z);
+  setPose(twoDPosition, pose.angles, height);
 }
 
 // "Grab and drag" planar pan: the point on the flat plane under the cursor
