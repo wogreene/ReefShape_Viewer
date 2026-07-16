@@ -227,16 +227,30 @@ cameraRig.addChild(camera);
 // currently focused.
 // --------------------------------------------------
 
-const MARKER_SEGMENTS = 24;
+const MARKER_SEGMENTS = 32;
 const MARKER_SCREEN_RADIUS_FACTOR = 0.02; // fraction of camera distance
+const MARKER_MIN_RADIUS = 0.01; // world units - keeps it visible even zoomed in tight
+const MARKER_RING_INNER_RATIO = 0.8; // inner edge as a fraction of the outer radius
 
+// A ring (annulus), not a filled disc: two concentric rows of vertices
+// (outer edge at radius 1, inner edge at MARKER_RING_INNER_RATIO) stitched
+// into a strip of quads, leaving the middle hollow.
 function createClickMarker() {
-  const positions = [0, 0, 0];
+  const positions = [];
   const indices = [];
   for (let i = 0; i <= MARKER_SEGMENTS; i++) {
     const angle = (i / MARKER_SEGMENTS) * Math.PI * 2;
-    positions.push(Math.cos(angle), 0, Math.sin(angle));
-    if (i > 0) indices.push(0, i, i + 1);
+    const cx = Math.cos(angle);
+    const cz = Math.sin(angle);
+    positions.push(cx, 0, cz); // outer vertex
+    positions.push(cx * MARKER_RING_INNER_RATIO, 0, cz * MARKER_RING_INNER_RATIO); // inner vertex
+    if (i > 0) {
+      const outerPrev = (i - 1) * 2;
+      const innerPrev = outerPrev + 1;
+      const outerCur = i * 2;
+      const innerCur = outerCur + 1;
+      indices.push(outerPrev, outerCur, innerPrev, innerPrev, outerCur, innerCur);
+    }
   }
 
   const mesh = new Mesh(device);
@@ -301,7 +315,7 @@ const clickMarker = createClickMarker();
 // size, so it reads as roughly the same on-screen size whether you're
 // zoomed in tight or framing the whole reef.
 function showClickMarkerAt(point) {
-  const radius = Math.max(distance * MARKER_SCREEN_RADIUS_FACTOR, 0.001);
+  const radius = Math.max(distance * MARKER_SCREEN_RADIUS_FACTOR, MARKER_MIN_RADIUS);
   clickMarker.setLocalScale(radius, 1, radius);
   clickMarker.setPosition(point.x, point.y + 0.001, point.z);
   clickMarker.enabled = true;
@@ -506,34 +520,24 @@ const pointerDownInfo = new Map(); // pointerId -> {x, y, time}
 const TAP_MAX_DURATION_MS = 300;
 const TAP_MAX_MOVEMENT_PX = 10;
 
-// Smooth "walk over and look closer" animation, driven by a click/tap (see
-// focusOnScreenPoint below). Target, yaw, and distance all ease together -
-// like noticing something off to the side, turning toward it, and stepping
-// in for a closer look - rather than just sliding sideways at a fixed
-// bearing and distance.
+// Smooth pan-to-target animation, driven by a click/tap (see
+// focusOnPoint/handleClickAt below). Yaw/pitch/distance are left alone -
+// only the target moves, which moves the camera's actual world position by
+// the same amount (since camera position = target + a fixed yaw/pitch/
+// distance offset from it). That's deliberate: an early version also eased
+// yaw and distance, but at the near-top-down pitches this viewer normally
+// sits at, yaw barely affects camera position at all (cos(pitch) ~ 0), so
+// the yaw swing just spun the view in place while the actual walk-over
+// motion happening through the target was easy to miss - it read as "the
+// camera didn't move." Plain target-only panning is unambiguous: the camera
+// visibly translates to sit over the new point, at any pitch.
 const FOCUS_ANIM_DURATION_MS = 550;
-const FOCUS_ANIM_DISTANCE_FACTOR = 0.7;
-const FOCUS_ANIM_TURN_FRACTION = 0.5;
 const focusAnim = {
   active: false,
   startTarget: new Vec3(),
   endTarget: new Vec3(),
-  startYaw: 0,
-  endYaw: 0,
-  startDistance: 0,
-  endDistance: 0,
   startTime: 0
 };
-
-// Smallest signed angle (degrees) from `from` to `to`, wrapped to [-180, 180]
-// - a plain subtraction would take the long way round whenever the two
-// angles straddle the +-180 seam.
-function shortestAngleDelta(from, to) {
-  let delta = (to - from) % 360;
-  if (delta > 180) delta -= 360;
-  if (delta < -180) delta += 360;
-  return delta;
-}
 
 const clampPitch = p => Math.max(MIN_PITCH, Math.min(MAX_PITCH, p));
 
@@ -807,25 +811,13 @@ const zoomAtScreenPoint = (screenX, screenY, factor) => {
   updateCamera();
 };
 
-// Click/tap-to-focus: recenters on whatever's under the cursor, turning
-// partway toward the direction of travel and stepping in closer - like
-// spotting something off to the side and walking over for a better look,
-// rather than sliding sideways at a fixed bearing and distance. Animated
-// (see the update loop below) instead of snapping instantly.
+// Click/tap-to-focus: recenters the view on whatever's under the cursor by
+// panning the target there - which physically moves the camera to sit over
+// the new point, since camera position is always target + a fixed offset.
+// Animated (see the update loop below) instead of snapping instantly.
 const focusOnPoint = point => {
-  const dx = point.x - target.x;
-  const dz = point.z - target.z;
-  // Only turn if the click is far enough away to have a meaningful travel
-  // direction - right on top of the current target, atan2(0, 0) is
-  // meaningless noise, not a heading to turn toward.
-  const travelYaw = dx * dx + dz * dz > 1e-8 ? (Math.atan2(dx, dz) * 180) / Math.PI : yaw;
-
   focusAnim.startTarget.copy(target);
   focusAnim.endTarget.copy(point);
-  focusAnim.startYaw = yaw;
-  focusAnim.endYaw = yaw + shortestAngleDelta(yaw, travelYaw) * FOCUS_ANIM_TURN_FRACTION;
-  focusAnim.startDistance = distance;
-  focusAnim.endDistance = clampDistance(distance * FOCUS_ANIM_DISTANCE_FACTOR);
   focusAnim.startTime = performance.now();
   focusAnim.active = true;
 };
@@ -1077,10 +1069,9 @@ app.on("update", dt => {
   updateCamera();
 });
 
-// Eases the click/tap-to-focus target/yaw/distance shift in over
-// FOCUS_ANIM_DURATION_MS instead of snapping, so it reads as a deliberate
-// turn-and-approach toward the clicked subject rather than a cut. Pitch is
-// untouched - the tilt constraint stays whatever it already was.
+// Eases the click/tap-to-focus target shift in over FOCUS_ANIM_DURATION_MS
+// instead of snapping, so it reads as a deliberate pan toward the clicked
+// point rather than a cut. yaw/pitch/distance are untouched throughout.
 app.on("update", () => {
   if (!focusAnim.active) return;
 
@@ -1089,8 +1080,6 @@ app.on("update", () => {
   const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
 
   target.lerp(focusAnim.startTarget, focusAnim.endTarget, eased);
-  yaw = focusAnim.startYaw + (focusAnim.endYaw - focusAnim.startYaw) * eased;
-  distance = focusAnim.startDistance + (focusAnim.endDistance - focusAnim.startDistance) * eased;
   updateCamera();
 
   if (t >= 1) focusAnim.active = false;
