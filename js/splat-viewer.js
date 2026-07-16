@@ -423,6 +423,18 @@ const flyVelocity = new Vec3();
 const worldAabbCenter = new Vec3();
 const pressedKeys = new Set();
 
+// The point zoom/pan speed scale distance-to - kept as a stable world-space
+// point (set once per framing, in setDefaultFrame/applyCameraPose/frameSplat
+// below) rather than deriving speed from a stored distance that only zoom
+// itself ever updated. That old approach silently went stale the moment
+// anything else moved the camera (Q/E, WASD, pan) without touching it, so
+// zoom kept scaling against a distance that no longer matched reality -
+// mathematically indistinguishable from the original "shrink toward a fixed
+// pivot" bug, just re-derived a different way. Recomputing live from the
+// camera's actual current position fixes that for any kind of movement, not
+// just Q/E.
+const zoomTarget = new Vec3();
+
 const damp = (damping, dt) => 1 - Math.pow(damping, dt * 1000);
 
 const getFrameDistance = radius => {
@@ -551,7 +563,7 @@ const setDefaultFrame = () => {
   const distance = clampDistance(getFrameDistance(sceneRadius));
   const position = positionFromOrbit(Vec3.ZERO, -45, MAX_PITCH, distance, sphericalPosition);
   setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
-  viewDistance = distance;
+  zoomTarget.set(0, 0, 0);
 };
 
 const posePosition = new Vec3();
@@ -574,7 +586,7 @@ const applyCameraPose = authoredPose => {
   if (camera.camera) camera.camera.fov = fov;
 
   setPose(pose.position, new Vec3(clampedPitch, pose.angles.y, 0), pose.distance);
-  viewDistance = pose.distance;
+  zoomTarget.copy(poseTarget);
   return true;
 };
 
@@ -592,7 +604,7 @@ const frameSplat = (splat, aabb) => {
   const distance = clampDistance(getFrameDistance(sceneRadius));
   const position = positionFromOrbit(target, -45, MAX_PITCH, distance, sphericalPosition);
   setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
-  viewDistance = distance;
+  zoomTarget.copy(target);
 };
 
 function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {
@@ -635,34 +647,39 @@ function dollyCamera(amount) {
 // controller's own `distance` (the fixed arm length used only for right-
 // drag orbit, which dollying never touches - see dollyCamera/translateCamera
 // above). Pan and dolly speed both scale off *this* instead, so a drag
-// still feels 1:1 - the point under the cursor stays under the cursor -
-// no matter how far you've zoomed, rather than always scaling as if the
-// camera were still at its starting distance.
-let viewDistance = 1;
+// still feels 1:1 - the point under the cursor stays under the cursor - no
+// matter how far you've zoomed. Computed live from the camera's actual
+// current distance to zoomTarget rather than stored as a value only zoom
+// itself updated - a stored value goes stale the instant anything else
+// moves the camera (Q/E, WASD, pan) without touching it, at which point
+// zoom keeps scaling against a distance that no longer matches reality:
+// mathematically the same "shrink toward a fixed pivot" bug as before, just
+// re-derived a different way. Recomputing fresh every time fixes that for
+// any kind of movement, not just zoom itself.
+function currentViewDistance() {
+  return Math.max(0.001, Math.min(maxZoomDistance, pose.position.distance(zoomTarget)));
+}
 
 // Applies a multiplicative zoom factor (< 1 = zooming in) as a forward/back
-// dolly of the equivalent absolute distance, and updates viewDistance by
-// the same factor so pan/future zoom stay scaled to the new depth.
+// dolly of the equivalent absolute distance.
 function zoomByFactor(factor) {
-  dollyCamera(viewDistance * (1 - factor));
-  viewDistance = Math.max(0.001, Math.min(maxZoomDistance, viewDistance * factor));
+  dollyCamera(currentViewDistance() * (1 - factor));
 }
 
 // "Grab and drag" planar pan: the point on the flat plane under the cursor
 // at the start of a move stays pinned under the cursor at the end of it, at
-// any zoom level - scaled by viewDistance (how far dollyCamera has actually
-// brought the camera in), not pose.distance (the orbit arm length, which
-// zoom no longer touches at all - see dollyCamera/viewDistance above). Using
-// pose.distance here was the bug: it stayed frozen at whatever it started
-// at, so pan always moved at that one fixed scale regardless of how far
-// you'd actually zoomed - too slow zoomed out, too fast zoomed in.
+// any zoom level - scaled by the camera's current distance to zoomTarget,
+// not pose.distance (the orbit arm length, which zoom never touches - see
+// dollyCamera above). Using pose.distance here was the original bug: it
+// stayed frozen at whatever it started at, so pan always moved at that one
+// fixed scale regardless of how far you'd actually zoomed.
 const panDelta = new Vec3();
 function planarPanDrag(deltaX, deltaY) {
   updateFlatBasis();
 
   const width = canvas.clientWidth || window.innerWidth;
   const height = canvas.clientHeight || window.innerHeight;
-  const halfHeight = viewDistance * Math.tan((fov * Math.PI) / 360);
+  const halfHeight = currentViewDistance() * Math.tan((fov * Math.PI) / 360);
   const halfWidth = halfHeight * (width / height);
 
   panDelta
@@ -1081,7 +1098,7 @@ window.__debug = {
   getYaw: () => pose.angles.y,
   getPitch: () => -pose.angles.x,
   getDistance: () => pose.distance,
-  getViewDistance: () => viewDistance,
+  getViewDistance: () => currentViewDistance(),
   getTarget: () => pose.getFocus(new Vec3()),
   getCameraPosition: () => pose.position.clone(),
   isSolidAtWorld: (x, y, z) => {
