@@ -414,10 +414,12 @@ class VoxelOctree {
   }
 }
 
-// Disabled for now - collision against the current voxel exports was getting
-// in the way of navigating the reef more than it was helping. Leaving the
-// loading/query code in place (just gated off here) so it's a one-line flip
-// to bring back.
+// Collision *enforcement* is disabled for now - it was getting in the way
+// of navigating the reef more than it was helping. The voxel data itself is
+// still loaded (below) and used for something else entirely: sampling real
+// substrate elevation for the click marker (see getSurfaceElevation) - so
+// this only gates the movement-blocking behavior in updateCamera, not the
+// load itself.
 const ENABLE_VOXEL_COLLISION = false;
 
 let voxelOctree = null;
@@ -431,7 +433,43 @@ function worldToVoxelSpace(worldPoint) {
   return voxelQueryPoint;
 }
 
-if (ENABLE_VOXEL_COLLISION && voxelCollision) {
+// Looks up the real reef surface height at a given (worldX, worldZ) by
+// scanning the voxel column downward from open water until hitting solid,
+// and returning the world Y of that first hit - i.e. where the substrate
+// actually is at that point, rather than assuming a flat reference plane.
+// Returns null if there's no voxel data, the column is out of the scanned
+// area, or nothing solid was found above the seafloor.
+//
+// Critically, the scan can't start from the grid's own top boundary: per
+// the format's flood-fill design (see isSolid above), "solid" means
+// "outside the flood-filled open-water pocket", not "physical reef
+// material" - the outer edge of the whole captured *volume* reads as solid
+// too, since the fill never reached out there. Starting the downward scan
+// from there would hit that boundary immediately, on every column,
+// regardless of where the real substrate is (confirmed empirically - it
+// returned the same height for every input). Starting instead from the
+// camera's own current height is safe because the camera is - by how this
+// viewer works - always floating in open water above the reef, so it's
+// guaranteed to start outside any solid region.
+function getSurfaceElevation(worldX, worldZ) {
+  if (!voxelOctree) return null;
+
+  const { gridMin, gridMax, voxelResolution } = voxelOctree;
+  const voxelX = -worldX;
+  const voxelZ = worldZ;
+  if (voxelX < gridMin[0] || voxelX > gridMax[0] || voxelZ < gridMin[2] || voxelZ > gridMax[2]) return null;
+
+  // voxel Y = -world Y (see worldToVoxelSpace), so the world-Y scan range
+  // [gridMax down to gridMin] corresponds to voxel Y [gridMin up to gridMax].
+  const worldYMax = Math.min(cameraPosition.y, -gridMin[1]);
+  const worldYMin = -gridMax[1];
+  for (let worldY = worldYMax; worldY >= worldYMin; worldY -= voxelResolution) {
+    if (voxelOctree.isSolid(voxelX, -worldY, voxelZ)) return worldY;
+  }
+  return null;
+}
+
+if (voxelCollision) {
   (async () => {
     try {
       const meta = await fetch(`${voxelCollision}.json`, { cache: "no-store" }).then(r => r.json());
@@ -582,7 +620,7 @@ const updateCamera = () => {
     return voxelOctree.isSolid(p.x, p.y, p.z);
   };
 
-  if (voxelOctree && distance <= lastGoodDistance) {
+  if (ENABLE_VOXEL_COLLISION && voxelOctree && distance <= lastGoodDistance) {
     if (isBlocked()) {
       // Full move blocked - before giving up entirely, try sliding along
       // just one horizontal target axis (keeping yaw/pitch/distance as
@@ -740,37 +778,47 @@ function computeRayDir(screenX, screenY, out) {
     .normalize();
 }
 
-function screenToGroundPoint(screenX, screenY, planeY, out) {
+// Intersects a screen-space ray with the plane through `target`,
+// perpendicular to the camera's `forward` direction, and writes the result
+// into `out`. Because that plane sits exactly `distance` out from the
+// camera along `forward` by construction, the ray-plane math scales
+// directly with `distance` - which is the fix for panning/zooming feeling
+// "stuck" at close zoom: an earlier version intersected a *horizontal*
+// ground plane fixed at `target.y` instead, so as `distance` shrunk toward
+// zero on zoom-in, the camera's height above that fixed-height plane also
+// shrunk toward zero, collapsing the ray/plane intersection math to almost
+// no movement per pixel of drag regardless of where the actual reef surface
+// was. This plane is anchored to the camera's own current geometry instead
+// of an external, possibly-stale height, so it scales correctly at any zoom
+// level and any pitch - the standard "trackball pan" plane used by most
+// orbit-camera tools (Blender, SketchUp, etc.).
+function screenToViewPlanePoint(screenX, screenY, out) {
   computeRayDir(screenX, screenY, rayDir);
   // Guards against a momentarily-zero canvas size (seen transiently during
   // some resize/layout events), which would otherwise divide-by-zero into a
   // NaN ray direction that Math.abs(...) < 1e-6 doesn't catch (comparisons
   // against NaN are always false) and permanently corrupt the camera target.
   if (!Number.isFinite(rayDir.x) || !Number.isFinite(rayDir.y) || !Number.isFinite(rayDir.z)) return null;
-  if (Math.abs(rayDir.y) < 1e-6) return null;
 
-  const t = (planeY - cameraPosition.y) / rayDir.y;
+  const denom = rayDir.dot(forward);
+  if (Math.abs(denom) < 1e-6) return null;
+
+  const t = distance / denom;
   if (t <= 0) return null;
 
   out.copy(cameraPosition).addScaled(rayDir, t);
   return out;
 }
 
-// True "grab and drag" pan: the ground point under the cursor at the start
-// of a move stays pinned under the cursor at the end of it, solved via
-// ray/ground-plane intersection rather than a flat FOV*distance
-// approximation. The old approximation assumed the camera looked straight
-// along its forward axis at a plane perpendicular to it, which increasingly
-// under/over-shoots the farther pitch tilts away from straight-down -
-// exactly where dragging started feeling disconnected from the cursor.
+// True "grab and drag" pan: the point under the cursor at the start of a
+// move stays pinned under the cursor at the end of it, at any zoom level.
 const rayHitPrev = new Vec3();
 const rayHitCur = new Vec3();
 const panDrag = (prevX, prevY, curX, curY) => {
   updateBasis();
 
-  const planeY = target.y;
-  const hitPrev = screenToGroundPoint(prevX, prevY, planeY, rayHitPrev);
-  const hitCur = screenToGroundPoint(curX, curY, planeY, rayHitCur);
+  const hitPrev = screenToViewPlanePoint(prevX, prevY, rayHitPrev);
+  const hitCur = screenToViewPlanePoint(curX, curY, rayHitCur);
   if (!hitPrev || !hitCur) return;
 
   nextTarget.copy(hitPrev).sub(hitCur);
@@ -787,10 +835,10 @@ const zoomRayDir = new Vec3();
 const zoomAtScreenPoint = (screenX, screenY, factor) => {
   updateBasis();
 
-  const groundPoint = screenToGroundPoint(screenX, screenY, target.y, rayHitPrev);
+  const planePoint = screenToViewPlanePoint(screenX, screenY, rayHitPrev);
   const newDistance = clampDistance(distance * factor);
 
-  if (!groundPoint) {
+  if (!planePoint) {
     distance = newDistance;
     updateCamera();
     return;
@@ -801,9 +849,9 @@ const zoomAtScreenPoint = (screenX, screenY, factor) => {
   if (Math.abs(zoomRayDir.y) > 1e-6) {
     const tPrime = (newDistance * forward.y) / zoomRayDir.y;
     target.set(
-      groundPoint.x - tPrime * zoomRayDir.x + newDistance * forward.x,
+      planePoint.x - tPrime * zoomRayDir.x + newDistance * forward.x,
       target.y,
-      groundPoint.z - tPrime * zoomRayDir.z + newDistance * forward.z
+      planePoint.z - tPrime * zoomRayDir.z + newDistance * forward.z
     );
   }
 
@@ -839,13 +887,22 @@ function cancelPendingFocus() {
 
 const handleClickAt = (screenX, screenY) => {
   updateBasis();
-  const groundPoint = screenToGroundPoint(screenX, screenY, target.y, rayHitPrev);
-  if (!groundPoint) return;
+  // The view-plane intersection gives a good X/Z estimate of what's under
+  // the cursor, but its Y is just wherever that plane happens to sit - not
+  // the real terrain height. Override it with the actual substrate surface
+  // height at that X/Z (if voxel data is available) so the marker sits on
+  // the reef instead of floating at a uniform, click-location-independent
+  // elevation.
+  const clickedPoint = screenToViewPlanePoint(screenX, screenY, rayHitPrev);
+  if (!clickedPoint) return;
 
-  showClickMarkerAt(groundPoint);
+  const surfaceY = getSurfaceElevation(clickedPoint.x, clickedPoint.z);
+  if (surfaceY !== null) clickedPoint.y = surfaceY;
+
+  showClickMarkerAt(clickedPoint);
 
   cancelPendingFocus();
-  pendingFocusPoint.copy(groundPoint);
+  pendingFocusPoint.copy(clickedPoint);
   pendingFocusTimer = setTimeout(() => {
     pendingFocusTimer = null;
     focusOnPoint(pendingFocusPoint);
@@ -1292,7 +1349,8 @@ window.__debug = {
   isSolidAtWorld: (x, y, z) => {
     const p = worldToVoxelSpace(new Vec3(x, y, z));
     return voxelOctree ? voxelOctree.isSolid(p.x, p.y, p.z) : null;
-  }
+  },
+  getSurfaceElevation: (x, z) => getSurfaceElevation(x, z)
 };
 
 app.on("update", () => {
