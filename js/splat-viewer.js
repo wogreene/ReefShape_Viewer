@@ -569,7 +569,13 @@ function updateFlatBasis() {
 const movedPose = new Pose();
 const candidatePosition = new Vec3();
 const slideCandidate = new Vec3();
-function translateCamera(offset, { skipCollision = false } = {}) {
+const appliedOffset = new Vec3();
+// Whether the actual applied movement (which can differ from the requested
+// offset if collision sliding kicked in) should carry zoomTarget along with
+// it - true for lateral/vertical glide (WASD/Q-E, pan), which shouldn't
+// change "how zoomed in" the view feels; false for dolly-zoom, where moving
+// the camera relative to zoomTarget *is* the zoom.
+function translateCamera(offset, { skipCollision = false, moveZoomTarget = false } = {}) {
   candidatePosition.copy(pose.position).add(offset);
 
   if (!skipCollision && isBlockedAt(candidatePosition)) {
@@ -593,6 +599,12 @@ function translateCamera(offset, { skipCollision = false } = {}) {
     }
 
     candidatePosition.copy(resolved || base);
+  }
+
+  if (moveZoomTarget) {
+    // Use the actual applied delta, not the requested offset - they can
+    // differ when collision sliding altered the candidate position.
+    zoomTarget.add(appliedOffset.copy(candidatePosition).sub(pose.position));
   }
 
   movedPose.position.copy(candidatePosition);
@@ -854,7 +866,7 @@ function planarPanDrag(deltaX, deltaY) {
     .set(0, 0, 0)
     .addScaled(right, (-deltaX / width) * halfWidth * 2)
     .addScaled(flatForward, (deltaY / height) * halfHeight * 2);
-  translateCamera(panDelta);
+  translateCamera(panDelta, { moveZoomTarget: true });
 }
 
 // Click-to-center: recenters the view on wherever was clicked, without
@@ -933,7 +945,12 @@ async function clickToCenter(screenX, screenY) {
   if (is2DMode) clickOffset.y = 0;
 
   translateCamera(clickOffset, { skipCollision: true });
-  zoomTarget.add(clickOffset);
+  // Set directly rather than offsetting zoomTarget by clickOffset - that
+  // increment is only equal to hitPoint if zoomTarget already equalled
+  // currentFocus, which isn't guaranteed (e.g. after a dolly-zoom, which
+  // deliberately moves the camera without moving zoomTarget). hitPoint is
+  // exactly what zoomTarget should become, unconditionally.
+  zoomTarget.copy(hitPoint);
 
   showClickMarker(hitPoint);
 }
@@ -1181,7 +1198,7 @@ app.on("update", dt => {
 
   if (flyVelocity.lengthSq() > 0) {
     move.copy(flyVelocity).mulScalar(dt);
-    translateCamera(move);
+    translateCamera(move, { moveZoomTarget: true });
   }
 
   // Orbit (right-drag/two-finger) and zoom (wheel/pinch) deltas accumulated
