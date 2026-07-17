@@ -481,6 +481,12 @@ let hasLoadedOnce = false;
 let is2DMode = false;
 let orthoHeight = null; // lazily initialized to sceneRadius on first entry into 2D mode
 
+// In-progress click-to-center camera slide (see startRecenterAnimation) -
+// { startPos, endPos, startTime, duration } or null when idle. Cancelled by
+// translateCamera/appendOrbitRotate the instant any manual input arrives, so
+// it never fights the user for control of the camera.
+let recenterAnim = null;
+
 const right = new Vec3();
 const flatForward = new Vec3();
 const move = new Vec3();
@@ -489,17 +495,29 @@ const flyVelocity = new Vec3();
 const worldAabbCenter = new Vec3();
 const pressedKeys = new Set();
 
-// The point zoom/pan speed scale distance-to - kept as a stable world-space
-// point (set once per framing, in setDefaultFrame/applyCameraPose/frameSplat
-// below) rather than deriving speed from a stored distance that only zoom
-// itself ever updated. That old approach silently went stale the moment
-// anything else moved the camera (Q/E, WASD, pan) without touching it, so
-// zoom kept scaling against a distance that no longer matched reality -
-// mathematically indistinguishable from the original "shrink toward a fixed
-// pivot" bug, just re-derived a different way. Recomputing live from the
-// camera's actual current position fixes that for any kind of movement, not
-// just Q/E.
+// World-space point set on framing/click-to-center and carried along by
+// every subsequent camera translation (see translateCamera's moveZoomTarget
+// option) - primarily the point click-to-center last focused on.
 const zoomTarget = new Vec3();
+
+// "How zoomed in" the camera currently is - used to scale pan speed, dolly
+// step size, and 2D's initial ortho framing. Tracked as its own scalar
+// rather than derived from distance(camera, zoomTarget): that formula
+// shrinks toward zero as dolly approaches zoomTarget (an actual point in
+// space, e.g. wherever was last clicked), and since Euclidean distance can't
+// go negative, continuing to dolly through that point made the camera fly
+// past it while the "distance" - having bottomed out - started growing
+// again on the other side. That reads as "zoom gets stuck near the target,
+// then suddenly unsticks and increases as you move through it," which is
+// exactly what it is: distance-to-a-point is the wrong quantity to zoom
+// against once you can fly through the point. Dollying still updates this
+// multiplicatively (zoomByFactor) and Q/E updates it additively by the
+// actual vertical distance moved (translateCamera's trackHeightChange) - so it
+// tracks real height above whatever's below, per its purpose - but neither
+// depends on zoomTarget's position, so there's no point to converge on or
+// pass through. WASD's horizontal glide and pan never touch it, matching
+// the fact that neither changes how far you are from the ground.
+let viewDistance = 1;
 
 const damp = (damping, dt) => 1 - Math.pow(damping, dt * 1000);
 
@@ -572,10 +590,17 @@ const slideCandidate = new Vec3();
 const appliedOffset = new Vec3();
 // Whether the actual applied movement (which can differ from the requested
 // offset if collision sliding kicked in) should carry zoomTarget along with
-// it - true for lateral/vertical glide (WASD/Q-E, pan), which shouldn't
-// change "how zoomed in" the view feels; false for dolly-zoom, where moving
-// the camera relative to zoomTarget *is* the zoom.
-function translateCamera(offset, { skipCollision = false, moveZoomTarget = false } = {}) {
+// it - true for essentially every movement type now, so zoomTarget stays a
+// sensible nearby point rather than something zoom math has to route around.
+// `trackHeightChange` separately feeds the *vertical* component of the
+// applied movement into viewDistance (see its declaration) - true only for
+// Q/E, since that's the one movement type that actually changes height
+// above the reef without an explicit zoom action.
+function translateCamera(offset, { skipCollision = false, moveZoomTarget = false, trackHeightChange = false } = {}) {
+  // Any manual movement takes over from an in-progress click-to-center
+  // slide immediately, rather than fighting it frame to frame.
+  recenterAnim = null;
+
   candidatePosition.copy(pose.position).add(offset);
 
   if (!skipCollision && isBlockedAt(candidatePosition)) {
@@ -601,10 +626,14 @@ function translateCamera(offset, { skipCollision = false, moveZoomTarget = false
     candidatePosition.copy(resolved || base);
   }
 
-  if (moveZoomTarget) {
+  if (moveZoomTarget || trackHeightChange) {
     // Use the actual applied delta, not the requested offset - they can
     // differ when collision sliding altered the candidate position.
-    zoomTarget.add(appliedOffset.copy(candidatePosition).sub(pose.position));
+    appliedOffset.copy(candidatePosition).sub(pose.position);
+    if (moveZoomTarget) zoomTarget.add(appliedOffset);
+    if (trackHeightChange) {
+      viewDistance = Math.max(0.001, Math.min(maxZoomDistance, viewDistance + appliedOffset.y));
+    }
   }
 
   movedPose.position.copy(candidatePosition);
@@ -687,6 +716,7 @@ const frameSplat = (splat, aabb) => {
 };
 
 function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {
+  recenterAnim = null; // manual orbit input takes over from an in-progress slide
   inputFrame.deltas.rotate.append([yawDeltaDeg, pitchDeltaDeg, 0]);
 }
 
@@ -728,7 +758,7 @@ function enter2DMode() {
 
   orthoHeight = Math.max(
     sceneRadius * ORTHO_HEIGHT_MIN_FACTOR,
-    Math.min(sceneRadius * ORTHO_HEIGHT_MAX_FACTOR, currentViewDistance())
+    Math.min(sceneRadius * ORTHO_HEIGHT_MAX_FACTOR, viewDistance)
   );
 
   const height = heightFor2DZoom(orthoHeight);
@@ -798,34 +828,22 @@ function updateViewForward() {
 // orbiting a fixed point above the reef.
 //
 // Backing away (amount < 0) is exempted from collision - see translateCamera.
+// zoomTarget rides along (moveZoomTarget) so it stays a sensible nearby
+// point rather than something the camera dollies through and away from.
 const dollyDelta = new Vec3();
 function dollyCamera(amount) {
   updateViewForward();
   dollyDelta.copy(viewForward).mulScalar(amount);
-  translateCamera(dollyDelta, { skipCollision: amount < 0 });
-}
-
-// Tracks "how zoomed in" the camera currently is, independent of the orbit
-// controller's own `distance` (the fixed arm length used only for right-
-// drag orbit, which dollying never touches - see dollyCamera/translateCamera
-// above). Pan and dolly speed both scale off *this* instead, so a drag
-// still feels 1:1 - the point under the cursor stays under the cursor - no
-// matter how far you've zoomed. Computed live from the camera's actual
-// current distance to zoomTarget rather than stored as a value only zoom
-// itself updated - a stored value goes stale the instant anything else
-// moves the camera (Q/E, WASD, pan) without touching it, at which point
-// zoom keeps scaling against a distance that no longer matches reality:
-// mathematically the same "shrink toward a fixed pivot" bug as before, just
-// re-derived a different way. Recomputing fresh every time fixes that for
-// any kind of movement, not just zoom itself.
-function currentViewDistance() {
-  return Math.max(0.001, Math.min(maxZoomDistance, pose.position.distance(zoomTarget)));
+  translateCamera(dollyDelta, { skipCollision: amount < 0, moveZoomTarget: true });
 }
 
 // Applies a multiplicative zoom factor (< 1 = zooming in) as a forward/back
-// dolly of the equivalent absolute distance.
+// dolly of the equivalent absolute distance, updating viewDistance by the
+// same factor (see its declaration for why it's tracked independently
+// rather than measured as distance-to-zoomTarget).
 function zoomByFactor(factor) {
-  dollyCamera(currentViewDistance() * (1 - factor));
+  dollyCamera(viewDistance * (1 - factor));
+  viewDistance = Math.max(0.001, Math.min(maxZoomDistance, viewDistance * factor));
 }
 
 // 2D mode's zoom: no camera movement at all (see enter2DMode) - just resizes
@@ -859,7 +877,7 @@ function planarPanDrag(deltaX, deltaY) {
 
   const width = canvas.clientWidth || window.innerWidth;
   const height = canvas.clientHeight || window.innerHeight;
-  const halfHeight = is2DMode ? orthoHeight : currentViewDistance() * Math.tan((fov * Math.PI) / 360);
+  const halfHeight = is2DMode ? orthoHeight : viewDistance * Math.tan((fov * Math.PI) / 360);
   const halfWidth = halfHeight * (width / height);
 
   panDelta
@@ -895,12 +913,9 @@ function showClickMarker(worldPoint) {
   // True fixed-screenspace sizing: derive the world-space scale that
   // produces a constant apparent size, from the actual distance to the
   // clicked point and the camera's current FOV (or orthoHeight in 2D,
-  // where apparent size is distance-independent). currentViewDistance()
-  // was the wrong basis for this - immediately after a click it collapses
-  // to pose.distance (camera-to-focus, at that instant equal to the click
-  // distance by construction - see clickToCenter), which has nothing to do
-  // with the actual current zoom depth, making the ring's size look
-  // arbitrary right when it's shown.
+  // where apparent size is distance-independent) - not viewDistance, which
+  // is a bookkeeping proxy for zoom/pan speed, not the true distance to any
+  // particular point.
   const size = Math.max(
     is2DMode
       ? orthoHeight * 2 * MARKER_SCREEN_FRACTION
@@ -919,6 +934,36 @@ function showClickMarker(worldPoint) {
 
 const currentFocus = new Vec3();
 
+// click-to-center resets the camera to exactly this far from the clicked
+// point (3D mode only) rather than preserving whatever distance it was
+// already at - preserving it tended to land too close (e.g. right after
+// zooming way in) since it just kept the pre-click camera-to-focus offset
+// verbatim. A fixed, comfortable reset distance is what actually makes
+// "recenter" useful as a way to recover from an extreme zoom.
+const CLICK_RECENTER_DISTANCE = 2;
+const recenterEndPosition = new Vec3();
+
+// Eases the camera from its current position to `endPosition` (and
+// pose.distance to `endDistance`) over 1-2 seconds instead of jumping
+// there instantly, so a click-to-center reads as a deliberate camera move
+// rather than a disorienting cut. Duration scales with how far the camera
+// actually has to travel relative to its pre-click zoom depth, so a small
+// nearby adjustment settles quickly while a hop across the whole reef
+// takes the full 2 seconds. Cancelled the instant any manual input arrives
+// (see translateCamera/appendOrbitRotate) rather than fighting for control.
+function startRecenterAnimation(endPosition, endDistance, referenceViewDistance) {
+  const travelDistance = pose.position.distance(endPosition);
+  const duration = Math.min(2, 1 + Math.min(1, travelDistance / (referenceViewDistance * 4 + 0.001)));
+  recenterAnim = {
+    startPosition: pose.position.clone(),
+    endPosition: endPosition.clone(),
+    startDistance: pose.distance,
+    endDistance,
+    startTime: performance.now(),
+    duration
+  };
+}
+
 async function clickToCenter(screenX, screenY) {
   if (!camera.camera) return;
 
@@ -931,28 +976,36 @@ async function clickToCenter(screenX, screenY) {
   const hitPoint = await picker.getWorldPointAsync(x, y);
   if (!hitPoint) return; // click missed all geometry (e.g. background/open water)
 
-  // The offset has to be measured from the point actually at screen center
-  // right now (pose.getFocus() - camera position + forward*distance), not
-  // from zoomTarget: zoomTarget only exists to scale pan/zoom speed and
-  // drifts away from "what's on screen" the moment you pan/orbit/dolly
-  // without an explicit recenter, so anchoring on it here would translate
-  // the clicked point to wherever zoomTarget last was rather than to center.
-  pose.getFocus(currentFocus);
-  clickOffset.copy(hitPoint).sub(currentFocus);
-  // 2D mode's camera height is fixed by design (see enter2DMode) - only
-  // recenter horizontally there, don't let a click on sloped terrain lift
-  // the camera off its pinned height.
-  if (is2DMode) clickOffset.y = 0;
+  const oldViewDistance = viewDistance;
+  let endDistance = pose.distance;
 
-  translateCamera(clickOffset, { skipCollision: true });
-  // Set directly rather than offsetting zoomTarget by clickOffset - that
-  // increment is only equal to hitPoint if zoomTarget already equalled
-  // currentFocus, which isn't guaranteed (e.g. after a dolly-zoom, which
-  // deliberately moves the camera without moving zoomTarget). hitPoint is
-  // exactly what zoomTarget should become, unconditionally.
+  if (is2DMode) {
+    // 2D's camera height is a fixed function of orthoHeight (see
+    // enter2DMode/zoomOrthoByFactor), not a zoom concept - only recenter
+    // horizontally, and leave height/distance/viewDistance untouched. The
+    // offset is measured from the point actually at screen center right
+    // now (pose.getFocus()), not zoomTarget - zoomTarget drifts away from
+    // "what's on screen" the moment you pan/orbit/dolly without an
+    // explicit recenter, so anchoring on it here would translate the
+    // clicked point to wherever zoomTarget last was rather than to center.
+    pose.getFocus(currentFocus);
+    clickOffset.copy(hitPoint).sub(currentFocus);
+    clickOffset.y = 0;
+    recenterEndPosition.copy(pose.position).add(clickOffset);
+  } else {
+    updateViewForward();
+    recenterEndPosition.copy(hitPoint).addScaled(viewForward, -CLICK_RECENTER_DISTANCE);
+    endDistance = CLICK_RECENTER_DISTANCE;
+    viewDistance = CLICK_RECENTER_DISTANCE;
+  }
+
+  // Set directly rather than offsetting zoomTarget by an offset vector -
+  // hitPoint is exactly what zoomTarget should become, unconditionally,
+  // regardless of any prior drift in the camera-to-focus relationship.
   zoomTarget.copy(hitPoint);
 
   showClickMarker(hitPoint);
+  startRecenterAnimation(recenterEndPosition, endDistance, oldViewDistance);
 }
 
 function touchCenterAndDist(activePointers) {
@@ -1150,7 +1203,19 @@ window.addEventListener("blur", () => {
   isControlKeyDown = false;
 });
 
+const recenterAnimPosition = new Vec3();
+
 app.on("update", dt => {
+  if (recenterAnim) {
+    const elapsed = (performance.now() - recenterAnim.startTime) / 1000;
+    const t = Math.min(1, elapsed / recenterAnim.duration);
+    const eased = t * t * (3 - 2 * t); // smoothstep
+    recenterAnimPosition.lerp(recenterAnim.startPosition, recenterAnim.endPosition, eased);
+    const distance = recenterAnim.startDistance + (recenterAnim.endDistance - recenterAnim.startDistance) * eased;
+    setPose(recenterAnimPosition, pose.angles, distance);
+    if (t >= 1) recenterAnim = null;
+  }
+
   desiredMove.set(0, 0, 0);
 
   const strafe =
@@ -1198,7 +1263,7 @@ app.on("update", dt => {
 
   if (flyVelocity.lengthSq() > 0) {
     move.copy(flyVelocity).mulScalar(dt);
-    translateCamera(move, { moveZoomTarget: true });
+    translateCamera(move, { moveZoomTarget: true, trackHeightChange: true });
   }
 
   // Orbit (right-drag/two-finger) and zoom (wheel/pinch) deltas accumulated
@@ -1209,7 +1274,7 @@ app.on("update", dt => {
 
   if (debugHud) {
     const { x, y, z } = pose.position;
-    const zoom = is2DMode ? orthoHeight : currentViewDistance();
+    const zoom = is2DMode ? orthoHeight : viewDistance;
     debugHud.textContent =
       `X: ${x.toFixed(3)}  Y: ${y.toFixed(3)}  Z: ${z.toFixed(3)}\nZoom: ${zoom.toFixed(3)}`;
   }
@@ -1431,13 +1496,14 @@ window.__debug = {
   getYaw: () => pose.angles.y,
   getPitch: () => -pose.angles.x,
   getDistance: () => pose.distance,
-  getViewDistance: () => currentViewDistance(),
+  getViewDistance: () => viewDistance,
   getTarget: () => pose.getFocus(new Vec3()),
   getCameraPosition: () => pose.position.clone(),
   isSolidAtWorld: (x, y, z) => (voxelOctree ? isSolidAt(new Vec3(x, y, z)) : null),
   is2DMode: () => is2DMode,
   getOrthoHeight: () => orthoHeight,
-  getProjection: () => camera.camera && camera.camera.projection
+  getProjection: () => camera.camera && camera.camera.projection,
+  isRecentering: () => !!recenterAnim
 };
 
 app.on("update", () => {
