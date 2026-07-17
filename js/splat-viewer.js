@@ -144,6 +144,7 @@ const select = document.getElementById("timepointSelect");
 const loaderEl = document.getElementById("loader");
 const loaderMessageEl = document.getElementById("loader-message");
 const loaderProgressBar = document.getElementById("loader-progress-bar");
+const debugHud = document.getElementById("debugHud");
 
 years.forEach(y => {
   const opt = document.createElement("option");
@@ -1188,6 +1189,13 @@ app.on("update", dt => {
   pose.copy(orbitController.update(inputFrame, dt));
   cameraRig.setPosition(pose.position);
   cameraRig.setEulerAngles(pose.angles);
+
+  if (debugHud) {
+    const { x, y, z } = pose.position;
+    const zoom = is2DMode ? orthoHeight : currentViewDistance();
+    debugHud.textContent =
+      `X: ${x.toFixed(3)}  Y: ${y.toFixed(3)}  Z: ${z.toFixed(3)}\nZoom: ${zoom.toFixed(3)}`;
+  }
 });
 
 setDefaultFrame();
