@@ -332,10 +332,10 @@ button:active {
   background: #444;
 }
 
-/* ---------------- Help button + modal (index.html) ---------------- */
+/* ---------------- Help button + modal (index.html, splat.html) ---------------- */
 
 /* Help button matches Change project (same height + styling, centered ?) */
-#help-btn{
+.help-btn{
   height: 36px;               /* match Change project height */
   width: 36px;
   border-radius: 999px;
@@ -358,35 +358,35 @@ button:active {
   -webkit-tap-highlight-color: transparent;
 }
 
-#help-btn:hover{
+.help-btn:hover{
   background: #222;           /* match hover behavior */
 }
 
-#help-btn:active{
+.help-btn:active{
   background: #444;           /* match active behavior */
 }
 
 /* Help modal */
-#help-modal{
+.help-modal{
   position: fixed;
   inset: 0;
   z-index: 10000;
   display: none;
 }
 
-#help-modal.is-open{
+.help-modal.is-open{
   display: block;
 }
 
 /* Darken map */
-#help-modal .help-backdrop{
+.help-modal .help-backdrop{
   position: absolute;
   inset: 0;
   background: rgba(0,0,0,0.65);
 }
 
 /* Popup panel */
-#help-modal .help-panel{
+.help-modal .help-panel{
   position: absolute;
   left: 50%;
   top: 50%;
@@ -400,10 +400,11 @@ button:active {
   border-radius: 14px;
   box-shadow: 0 18px 60px rgba(0,0,0,0.55);
   overflow: hidden;
+  overflow-y: auto;
 }
 
 /* Close button (top-left) */
-#help-modal .help-close{
+.help-modal .help-close{
   position: absolute;
   top: 10px;
   left: 10px;
@@ -421,12 +422,12 @@ button:active {
   cursor: pointer;
 }
 
-#help-modal .help-content{
-  padding: 52px 14px 14px;
+.help-modal .help-content{
+  padding: 52px 20px 20px;
 }
 
 /* Responsive 16:9 video */
-#help-modal .help-video{
+.help-modal .help-video{
   position: relative;
   width: 100%;
   padding-top: 56.25%;
@@ -435,12 +436,75 @@ button:active {
   overflow: hidden;
 }
 
-#help-modal .help-video iframe{
+.help-modal .help-video iframe{
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   border: 0;
+}
+
+/* Controls list (splat.html) */
+.help-modal .controls-content{
+  max-width: 520px;
+}
+
+.help-modal .controls-content h2{
+  margin: 0 0 14px;
+  font-size: 18px;
+}
+
+.help-modal .controls-content h3{
+  margin: 18px 0 8px;
+  font-size: 14px;
+  color: rgba(255,255,255,0.65);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.help-modal .controls-content h3:first-of-type{
+  margin-top: 0;
+}
+
+.help-modal .controls-list{
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.help-modal .controls-list li{
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 4px 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.help-modal .controls-list kbd{
+  flex: 0 0 auto;
+  min-width: 108px;
+  font-family: inherit;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  padding: 2px 6px;
+  text-align: center;
+}
+
+.help-modal .controls-list span{
+  color: rgba(255,255,255,0.85);
+}
+
+/* Fixed top-right placement for splat.html's controls button (index.html
+   positions its own via #top-right-controls instead - see its inline style) */
+#controlsHelpButton{
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 2000;
 }
 
 /* Viewer UI mobile bump */
@@ -455,5 +519,9 @@ button:active {
   .viewer-ui button {
     font-size: 16px;
     padding: 6px 12px;
+  }
+
+  .help-modal .controls-list li{
+    font-size: 16px;
   }
 }

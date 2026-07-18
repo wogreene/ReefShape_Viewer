@@ -1296,6 +1296,35 @@ if (modeToggleButton) {
 }
 
 // --------------------------------------------------
+// Controls help popup
+// --------------------------------------------------
+
+const controlsHelpButton = document.getElementById("controlsHelpButton");
+const controlsModal = document.getElementById("controlsModal");
+if (controlsHelpButton && controlsModal) {
+  const controlsBackdrop = controlsModal.querySelector(".help-backdrop");
+  const controlsClose = controlsModal.querySelector(".help-close");
+
+  const openControlsHelp = () => {
+    controlsModal.classList.add("is-open");
+    controlsModal.setAttribute("aria-hidden", "false");
+  };
+  const closeControlsHelp = () => {
+    controlsModal.classList.remove("is-open");
+    controlsModal.setAttribute("aria-hidden", "true");
+  };
+
+  controlsHelpButton.addEventListener("click", openControlsHelp);
+  controlsClose.addEventListener("click", closeControlsHelp);
+  controlsBackdrop.addEventListener("click", closeControlsHelp);
+  window.addEventListener("keydown", event => {
+    if (event.key === "Escape" && controlsModal.classList.contains("is-open")) {
+      closeControlsHelp();
+    }
+  });
+}
+
+// --------------------------------------------------
 // VR (WebXR)
 //
 // Only shown when a headset is actually available. The camera's local

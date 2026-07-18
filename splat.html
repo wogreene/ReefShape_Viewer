@@ -110,6 +110,46 @@
     <button id="vrButton" type="button" style="display:none;">Enter VR</button>
   </div>
 
+  <button id="controlsHelpButton" class="help-btn" type="button" aria-label="Show controls" title="Controls">?</button>
+
+  <!-- Controls help modal -->
+  <div id="controlsModal" class="help-modal" aria-hidden="true" role="dialog" aria-label="Viewer controls">
+    <div class="help-backdrop"></div>
+
+    <div class="help-panel" role="document">
+      <button class="help-close" type="button" aria-label="Close controls">✕</button>
+
+      <div class="help-content controls-content">
+        <h2>Controls</h2>
+
+        <h3>Mouse &amp; keyboard</h3>
+        <ul class="controls-list">
+          <li><kbd>Left drag</kbd><span>Pan</span></li>
+          <li><kbd>Right drag</kbd><span>Orbit</span></li>
+          <li><kbd>Scroll</kbd><span>Zoom</span></li>
+          <li><kbd>Click</kbd><span>Recenter on that point</span></li>
+          <li><kbd>W A S D / Arrows</kbd><span>Move across the reef</span></li>
+          <li><kbd>Q / E</kbd><span>Move up / down (3D only)</span></li>
+          <li><kbd>Shift</kbd><span>Move faster</span></li>
+          <li><kbd>Ctrl</kbd><span>Move slower</span></li>
+        </ul>
+
+        <h3>Touch</h3>
+        <ul class="controls-list">
+          <li><kbd>1 finger drag</kbd><span>Pan</span></li>
+          <li><kbd>2 finger drag</kbd><span>Orbit</span></li>
+          <li><kbd>Pinch</kbd><span>Zoom</span></li>
+          <li><kbd>Tap</kbd><span>Recenter on that point</span></li>
+        </ul>
+
+        <h3>View</h3>
+        <ul class="controls-list">
+          <li><kbd>2D / 3D</kbd><span>Toggle top-down orthographic view</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
   <div id="debugHud"></div>
 
   <!-- Loading overlay -->
