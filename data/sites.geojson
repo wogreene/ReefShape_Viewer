@@ -70,6 +70,7 @@
         "id": "sandycay",
         "name": "Sandy Cay Reef",
 		"passwords": ["demo"],
+        "public": true,
 
         "bounds": [-76.99093376, 26.3947475649, -76.9879637739, 26.403501208],
 

@@ -101,19 +101,6 @@ if (!reefId) {
   throw new Error("Missing reef id");
 }
 
-const sessionPw = getSessionPassword();
-if (!sessionPw) {
-  bounceToIndex("Please enter a project password to access this viewer.");
-  throw new Error("Missing session password");
-}
-
-try {
-  await loadProjectsConfig();
-} catch (e) {
-  console.error("Failed to load data/projects.json (master access may not work):", e);
-  MASTER_PASSWORDS = new Set();
-}
-
 const sites = await fetch("data/sites.geojson", { cache: "no-store" }).then(r => r.json());
 const feature = (sites.features || []).find(f => f?.properties?.id === reefId);
 
@@ -122,9 +109,28 @@ if (!feature) {
   throw new Error("Invalid reef id");
 }
 
-if (!featureAllowsAccess(feature.properties, sessionPw)) {
-  bounceToIndex("Access denied for this site with the current password.");
-  throw new Error("Access denied");
+// Reefs marked "public" (e.g. for sharing a direct link) skip the password
+// gate entirely - this is opt-in per site in sites.geojson, not a general
+// bypass, and doesn't touch index.html/map.js or any other viewer, so
+// following "Back" from here still requires a password for everything else.
+if (!feature.properties?.public) {
+  const sessionPw = getSessionPassword();
+  if (!sessionPw) {
+    bounceToIndex("Please enter a project password to access this viewer.");
+    throw new Error("Missing session password");
+  }
+
+  try {
+    await loadProjectsConfig();
+  } catch (e) {
+    console.error("Failed to load data/projects.json (master access may not work):", e);
+    MASTER_PASSWORDS = new Set();
+  }
+
+  if (!featureAllowsAccess(feature.properties, sessionPw)) {
+    bounceToIndex("Access denied for this site with the current password.");
+    throw new Error("Access denied");
+  }
 }
 
 const { splats, splatPose, voxelCollision } = feature.properties;

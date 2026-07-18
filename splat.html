@@ -83,15 +83,12 @@
     }
   </style>
 
-  <script>
-    // Gate: if user didn't come through splash / has no session password, bounce back
-    (function enforcePasswordGate() {
-      const pw = (sessionStorage.getItem("reefshape_password") || "").trim();
-      if (!pw) {
-        window.location.replace("./index.html");
-      }
-    })();
-  </script>
+  <!-- No synchronous password-gate script here (unlike viewer.html) - some
+       reefs are marked "public" in sites.geojson for direct-link sharing, and
+       that requires knowing which reef this is first. js/splat-viewer.js does
+       the actual gating (password-protected reefs still bounce to index.html
+       if unauthenticated), it just needs to check sites.geojson before it can
+       decide. -->
 </head>
 
 <body>
