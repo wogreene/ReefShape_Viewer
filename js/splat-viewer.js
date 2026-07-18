@@ -671,6 +671,7 @@ const setDefaultFrame = () => {
   const position = positionFromOrbit(Vec3.ZERO, -45, MAX_PITCH, distance, sphericalPosition);
   setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
   zoomTarget.set(0, 0, 0);
+  viewDistance = distance;
 };
 
 const posePosition = new Vec3();
@@ -695,6 +696,7 @@ const applyCameraPose = authoredPose => {
 
   setPose(pose.position, new Vec3(clampedPitch, pose.angles.y, 0), pose.distance);
   zoomTarget.copy(poseTarget);
+  viewDistance = clampDistance(poseDistance);
   return true;
 };
 
@@ -713,6 +715,7 @@ const frameSplat = (splat, aabb) => {
   const position = positionFromOrbit(target, -45, MAX_PITCH, distance, sphericalPosition);
   setPose(position, new Vec3(-MAX_PITCH, -45, 0), distance);
   zoomTarget.copy(target);
+  viewDistance = distance;
 };
 
 function appendOrbitRotate(yawDeltaDeg, pitchDeltaDeg) {

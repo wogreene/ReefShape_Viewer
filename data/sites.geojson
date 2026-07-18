@@ -82,8 +82,8 @@
           "20230517": "https://pub-bdf2d3597b1f4cc3ae2811fe08f63330.r2.dev/splat/lod-meta.json"
         },
         "splatPose": {
-          "position": [0.7775137424468994, 0.621147871017456, 0.09822270274162292],
-          "target": [0, 0, 0],
+          "position": [-9.83949416236404, 0.18348838842792514, -4.567531058892401],
+          "target": [-8.32554835877371, -0.8165116115720749, -5.4089394637655825],
           "fov": 75
         },
         "voxelCollision": "https://pub-bdf2d3597b1f4cc3ae2811fe08f63330.r2.dev/voxel/scene.voxel"
