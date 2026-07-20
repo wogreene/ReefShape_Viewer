@@ -31,6 +31,7 @@ import {
   InputFrame,
   DEVICETYPE_WEBGPU,
   DEVICETYPE_WEBGL2,
+  XrManager,
   XRTYPE_VR,
   XRSPACE_LOCALFLOOR,
   PROJECTION_ORTHOGRAPHIC,
@@ -190,6 +191,11 @@ const createOptions = new AppOptions();
 createOptions.graphicsDevice = device;
 createOptions.componentSystems = [CameraComponentSystem, GSplatComponentSystem, RenderComponentSystem];
 createOptions.resourceHandlers = [TextureHandler, GSplatHandler];
+// Without this, AppBase leaves app.xr null (AppOptions.xr is opt-in, not
+// automatic) - the VR button and everything in the "VR (WebXR)" section
+// below silently no-ops without ever throwing, since every use of app.xr
+// is behind an `if (app.xr)`/`app.xr?.` guard.
+createOptions.xr = XrManager;
 
 const app = new AppBase(canvas);
 app.init(createOptions);
@@ -649,11 +655,33 @@ function translateCamera(offset, { skipCollision = false, moveZoomTarget = false
   pose.copy(movedPose);
 }
 
+const cameraRigAngles = new Vec3();
+
+// Pushes pose onto cameraRig - except for pitch/roll while an XR session is
+// active. In VR the headset supplies its own full-range look direction (the
+// engine overwrites camera's *local* rotation from tracking every frame -
+// see the cameraRig/camera split above), so baking the desktop orbit
+// camera's pitch (clamped to MIN_PITCH..MAX_PITCH - see its declaration)
+// into the *rig's* rotation as well would tilt the real-world "up" the
+// headset reports relative to the world - not a soft limit on how far you
+// can look, but a constant disorienting skew, on top of whatever the
+// headset itself is doing. Yaw is fine to carry over (turning the rig is
+// how snap-turn works - see updateVrLocomotion), it's only pitch/roll of
+// the *rig* that must stay level.
+function syncCameraRig() {
+  cameraRig.setPosition(pose.position);
+  if (app.xr && app.xr.active) {
+    cameraRigAngles.set(0, pose.angles.y, 0);
+  } else {
+    cameraRigAngles.copy(pose.angles);
+  }
+  cameraRig.setEulerAngles(cameraRigAngles);
+}
+
 function setPose(position, angles, distance) {
   pose.set(position, angles, distance);
   orbitController.attach(pose, false);
-  cameraRig.setPosition(pose.position);
-  cameraRig.setEulerAngles(pose.angles);
+  syncCameraRig();
 }
 
 const sphericalPosition = new Vec3();
@@ -1275,11 +1303,16 @@ app.on("update", dt => {
     translateCamera(move, { moveZoomTarget: true, trackHeightChange: true });
   }
 
+  if (app.xr && app.xr.active) {
+    updateVrLocomotion(dt);
+  }
+
   // Orbit (right-drag/two-finger) and zoom (wheel/pinch) deltas accumulated
-  // since last frame get processed and folded into the pose here.
+  // since last frame get processed and folded into the pose here (this is
+  // also how updateVrLocomotion's snap-turn reaches the pose - it just
+  // appends into the same rotate deltas WASD/mouse-orbit do).
   pose.copy(orbitController.update(inputFrame, dt));
-  cameraRig.setPosition(pose.position);
-  cameraRig.setEulerAngles(pose.angles);
+  syncCameraRig();
 
   if (debugHud) {
     const { x, y, z } = pose.position;
@@ -1374,6 +1407,114 @@ if (vrButton) {
       app.xr.start(camera.camera, XRTYPE_VR, XRSPACE_LOCALFLOOR);
     }
   });
+}
+
+// --------------------------------------------------
+// VR controller locomotion
+//
+// Left thumbstick: fly forward/strafe, relative to wherever the headset is
+// actually looking right now (camera.forward/right - the real-time tracked
+// direction, not just the rig's yaw, which only changes on a snap-turn) -
+// flattened the same way WASD's flatForward is (see updateFlatBasis), so
+// glancing down doesn't turn "forward" into "dive".
+// Right thumbstick Y: climb/dive along world-up, ignoring head tilt - same
+// reasoning as Q/E on desktop (see the `lift` line below in the update
+// loop): pushing the stick shouldn't do something different depending on
+// which way you happen to be looking.
+// Right thumbstick X: snap-turns the rig by VR_SNAP_TURN_DEGREES rather
+// than turning smoothly, since smooth rotation stacked on smooth
+// translation is one of the more nausea-inducing VR combinations - this is
+// the standard "VR comfort" default. All of this is just tunable constants
+// below if a different feel is wanted (e.g. set VR_SNAP_TURN_DEGREES to a
+// smaller value for finer snaps, or swap which stick drives which axis).
+// --------------------------------------------------
+
+const VR_STICK_DEADZONE = 0.15;
+const VR_SNAP_TURN_DEGREES = 30;
+const VR_SNAP_TURN_REARM_THRESHOLD = 0.4; // stick must return this close to center before the next snap can fire
+
+let vrLeftInput = null;
+let vrRightInput = null;
+let vrSnapTurnArmed = true;
+
+if (app.xr) {
+  app.xr.input.on("add", inputSource => {
+    if (inputSource.handedness === "left") vrLeftInput = inputSource;
+    else if (inputSource.handedness === "right") vrRightInput = inputSource;
+
+    inputSource.on("remove", () => {
+      if (vrLeftInput === inputSource) vrLeftInput = null;
+      if (vrRightInput === inputSource) vrRightInput = null;
+    });
+  });
+
+  // Belt-and-suspenders alongside the per-input-source "remove" handling
+  // above - guarantees stale references can't survive a session ending.
+  app.xr.on("end", () => {
+    vrLeftInput = null;
+    vrRightInput = null;
+    vrSnapTurnArmed = true;
+  });
+}
+
+const vrStickResult = { x: 0, y: 0 };
+function readVrStick(inputSource) {
+  const gamepad = inputSource && inputSource.gamepad;
+  const axes = gamepad && gamepad.axes;
+  if (!axes || axes.length < 2) return null;
+
+  // The xr-standard gamepad mapping reports the thumbstick at axes[2]/[3]
+  // (axes[0]/[1] are the touchpad - always 0 on Quest Touch controllers,
+  // which don't have one). Controllers that only ever expose two axes
+  // total report the stick at [0]/[1] instead.
+  const x = axes.length >= 4 ? axes[2] : axes[0];
+  const y = axes.length >= 4 ? axes[3] : axes[1];
+  vrStickResult.x = Math.abs(x) > VR_STICK_DEADZONE ? x : 0;
+  vrStickResult.y = Math.abs(y) > VR_STICK_DEADZONE ? y : 0;
+  return vrStickResult;
+}
+
+const vrFlatForward = new Vec3();
+const vrFlatRight = new Vec3();
+const vrMove = new Vec3();
+
+function updateVrLocomotion(dt) {
+  const left = readVrStick(vrLeftInput);
+  const right = readVrStick(vrRightInput);
+
+  vrMove.set(0, 0, 0);
+
+  if (left) {
+    vrFlatForward.copy(camera.forward);
+    vrFlatForward.y = 0;
+    if (vrFlatForward.lengthSq() > 1e-8) vrFlatForward.normalize();
+
+    vrFlatRight.copy(camera.right);
+    vrFlatRight.y = 0;
+    if (vrFlatRight.lengthSq() > 1e-8) vrFlatRight.normalize();
+
+    // Stick Y is negative when pushed forward (away from the thumb).
+    vrMove.addScaled(vrFlatRight, left.x).addScaled(vrFlatForward, -left.y);
+  }
+
+  if (right) {
+    vrMove.y += -right.y;
+  }
+
+  if (vrMove.lengthSq() > 0) {
+    if (vrMove.lengthSq() > 1) vrMove.normalize(); // combined XZ+Y push shouldn't exceed a single stick's max speed
+    vrMove.mulScalar(MOVE_SPEED * dt);
+    translateCamera(vrMove, { moveZoomTarget: true, trackHeightChange: true });
+  }
+
+  if (right) {
+    if (vrSnapTurnArmed && Math.abs(right.x) > 0.6) {
+      appendOrbitRotate(Math.sign(right.x) * VR_SNAP_TURN_DEGREES, 0);
+      vrSnapTurnArmed = false;
+    } else if (Math.abs(right.x) < VR_SNAP_TURN_REARM_THRESHOLD) {
+      vrSnapTurnArmed = true;
+    }
+  }
 }
 
 // --------------------------------------------------
@@ -1541,7 +1682,13 @@ window.__debug = {
   is2DMode: () => is2DMode,
   getOrthoHeight: () => orthoHeight,
   getProjection: () => camera.camera && camera.camera.projection,
-  isRecentering: () => !!recenterAnim
+  isRecentering: () => !!recenterAnim,
+  getXrStatus: () => ({
+    supported: !!(app.xr && app.xr.supported),
+    available: !!(app.xr && app.xr.isAvailable(XRTYPE_VR)),
+    active: !!(app.xr && app.xr.active),
+    controllers: { left: !!vrLeftInput, right: !!vrRightInput }
+  })
 };
 
 app.on("update", () => {
