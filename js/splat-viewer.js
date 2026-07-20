@@ -835,7 +835,7 @@ function enter2DMode() {
   }
 
   // The underwater fog tint is distance-from-camera based (see
-  // setupUnderwaterFog below), and 2D mode's camera sits far enough above
+  // setupGsplatShaderEffects below), and 2D mode's camera sits far enough above
   // the reef to frame the whole scene that everything reads as uniformly
   // fogged - fine for an immersive perspective view, wrong for a flat
   // photomosaic that's supposed to look like an evenly-exposed orthophoto.
@@ -1684,17 +1684,32 @@ async function vrTriggerRecenter(inputSource) {
 // --------------------------------------------------
 
 // --------------------------------------------------
-// Distance-based underwater fog
+// Underwater fog + progressive load reveal effect
 //
-// Tints each splat's color toward a fog color based on its distance from
-// the camera - the classic exponential light-attenuation-through-water
-// look. Implemented via the engine's gsplatModifyVS shader chunk override
-// on the scene-wide *unified* gsplat material (app.scene.gsplat.material -
-// see the "unified: true" component option in loadTimepoint below), the
-// same technique PlayCanvas's own underwater water script uses for lit
-// materials via litUserMainEndPS (engine PR #9029, scripts/esm/water.mjs),
-// just applied per-splat instead of per-lit-pixel since our scene is 100%
-// gsplat with nothing else to shade.
+// Two independent gsplat vertex-shader effects, folded into one merged
+// gsplatModifyVS/gsplatModifyPS chunk override on the scene-wide *unified*
+// gsplat material (app.scene.gsplat.material - see the "unified: true"
+// component option in loadTimepoint) because only one chunk source can
+// occupy that slot at a time - they can't be set up independently.
+//
+// Fog tints each splat's color toward a fog color based on its distance
+// from the camera - the classic exponential light-attenuation-through-water
+// look, the same technique PlayCanvas's own underwater water script uses
+// for lit materials via litUserMainEndPS (engine PR #9029,
+// scripts/esm/water.mjs), just applied per-splat instead of per-lit-pixel
+// since our scene is 100% gsplat with nothing else to shade.
+//
+// The reveal effect masks the block-by-block pop-in of a freshly (re)loaded
+// splat's initial streamed tiles with a deliberate animated wave instead - a
+// wave of tinted dots washes out from the model's center, followed by a
+// lift wave that settles each splat into its real shape/color - rather than
+// splats just appearing wherever their LOD tile happens to finish
+// downloading. Ported from PlayCanvas's own GSplatRevealRadial script
+// (playcanvas/scripts/esm/gsplat/reveal-radial.mjs, see the
+// gaussian-splatting/lod-streaming example) rather than used directly,
+// since that script's base class manages the gsplatModifyVS/gsplatModifyPS
+// chunks by unconditionally overwriting them - fine on its own, but
+// incompatible with also having fog in the same slot.
 // --------------------------------------------------
 
 // Same literal values as the camera's clearColor above - keep them in sync
@@ -1704,7 +1719,26 @@ const FOG_DENSITY = 0.035;
 const camPos = new Vec3();
 let fogSupported = false;
 
-function setupUnderwaterFog() {
+// Additive tint colors for the reveal wave - components above 1 are
+// intentional (additive blending), producing a brighter flash than a plain
+// color could.
+const REVEAL_DOT_TINT = [0.3, 0.8, 1.0];
+const REVEAL_WAVE_TINT = [1.5, 1.8, 2.0];
+// Total time from load to fully revealed, independent of scene scale (see
+// startRevealEffect, which derives speed/endRadius from sceneRadius so a
+// tiny reef and a huge one both take about this long).
+const REVEAL_DURATION_SECONDS = 2.2;
+const REVEAL_DELAY_SECONDS = 0.3; // gap between the dot wave and the lift wave starting
+
+const revealCenter = new Vec3();
+let revealActive = false;
+let revealStartTime = 0;
+let revealSpeed = 0;
+let revealEndRadius = 0;
+let revealBandWidth = 0;
+let revealOscillation = 0;
+
+function setupGsplatShaderEffects() {
   try {
     const gsplatMat = app.scene.gsplat.material;
 
@@ -1715,11 +1749,107 @@ function setupUnderwaterFog() {
         uniform vec3 uFogColor;
         uniform float uFogDensity;
 
+        uniform float uTime;
+        uniform vec3 uRevealCenter;
+        uniform float uRevealSpeed;
+        uniform float uRevealDelay;
+        uniform vec3 uRevealDotTint;
+        uniform vec3 uRevealWaveTint;
+        uniform float uRevealOscillation;
+        uniform float uRevealEndRadius;
+        uniform float uRevealBandWidth;
+
+        float g_revealDist;
+        float g_revealDotWavePos;
+        float g_revealLiftTime;
+        float g_revealLiftWavePos;
+
+        float revealHash(vec3 p) {
+          return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+        }
+
+        // uRevealEndRadius < 0 means "inactive" (see startRevealEffect) -
+        // every function below is a guaranteed no-op in that state, since
+        // g_revealDist (always >= 0) can never be within a negative radius.
         void modifySplatCenter(inout vec3 center) {
+          g_revealDist = length(center - uRevealCenter);
+          if (g_revealDist > uRevealEndRadius) return;
+
+          g_revealDotWavePos = uRevealSpeed * uTime;
+          g_revealLiftTime = max(0.0, uTime - uRevealDelay);
+          g_revealLiftWavePos = uRevealSpeed * g_revealLiftTime;
+
+          bool wavesActive = g_revealLiftTime <= 0.0 || g_revealDist > g_revealLiftWavePos - 1.5 * uRevealBandWidth;
+          if (wavesActive) {
+            float phase = revealHash(center) * 6.28318;
+            center.y += sin(uTime * 3.0 + phase) * uRevealOscillation * 0.25;
+          }
+
+          float distToLiftWave = abs(g_revealDist - g_revealLiftWavePos);
+          if (distToLiftWave < uRevealBandWidth && g_revealLiftTime > 0.0) {
+            float normalizedDist = distToLiftWave / uRevealBandWidth;
+            float liftAmount = (1.0 - normalizedDist) * sin(normalizedDist * 3.14159);
+            center.y += liftAmount * uRevealOscillation * 0.9;
+          }
         }
+
         void modifySplatRotationScale(vec3 originalCenter, vec3 modifiedCenter, inout vec4 rotation, inout vec3 scale) {
+          if (g_revealDist > uRevealEndRadius) {
+            // Only while actively revealing (endRadius >= 0) does "beyond
+            // the wave" mean "not shown yet" - while inactive this must
+            // stay a no-op, not hide the whole model.
+            if (uRevealEndRadius >= 0.0) scale = vec3(0.0);
+            return;
+          }
+
+          vec3 origScale = scale;
+          float origSize = gsplatGetSizeFromScale(scale);
+
+          float scaleFactor;
+          bool isLiftWave = g_revealLiftTime > 0.0 && g_revealLiftWavePos > g_revealDist;
+
+          if (isLiftWave) {
+            scaleFactor = (g_revealLiftWavePos >= g_revealDist + 2.0) ? 1.0 : mix(0.1, 1.0, (g_revealLiftWavePos - g_revealDist) * 0.5);
+          } else if (g_revealDist > g_revealDotWavePos + 1.0) {
+            scale = vec3(0.0);
+            return;
+          } else if (g_revealDist > g_revealDotWavePos - 1.0) {
+            float distToWave = abs(g_revealDist - g_revealDotWavePos);
+            scaleFactor = (distToWave < 0.5)
+              ? mix(0.1, 0.2, 1.0 - distToWave * 2.0)
+              : mix(0.0, 0.1, smoothstep(g_revealDotWavePos + 1.0, g_revealDotWavePos - 1.0, g_revealDist));
+          } else {
+            scaleFactor = 0.1;
+          }
+
+          if (scaleFactor >= 1.0) {
+            return;
+          } else if (isLiftWave) {
+            float t = (scaleFactor - 0.1) * 1.111111;
+            float dotSize = scaleFactor * 0.05;
+            float finalSize = mix(dotSize, origSize, t);
+            vec3 sphericalScale = vec3(finalSize);
+            vec3 scaledOrig = origScale * scaleFactor;
+            scale = mix(sphericalScale, scaledOrig, t);
+          } else {
+            float targetSize = min(scaleFactor * 0.05, origSize);
+            gsplatMakeSpherical(scale, targetSize);
+          }
         }
+
         void modifySplatColor(vec3 center, inout vec4 color) {
+          if (g_revealDist <= uRevealEndRadius) {
+            if (g_revealLiftTime > 0.0 && g_revealDist >= g_revealLiftWavePos - 1.5 * uRevealBandWidth && g_revealDist <= g_revealLiftWavePos + 0.5 * uRevealBandWidth) {
+              float distToLift = abs(g_revealDist - g_revealLiftWavePos);
+              float liftIntensity = smoothstep(1.5 * uRevealBandWidth, 0.0, distToLift);
+              color.rgb += uRevealWaveTint * liftIntensity;
+            } else if (g_revealDist <= g_revealDotWavePos && (g_revealLiftTime <= 0.0 || g_revealDist > g_revealLiftWavePos + 0.5 * uRevealBandWidth)) {
+              float distToDot = abs(g_revealDist - g_revealDotWavePos);
+              float dotIntensity = smoothstep(uRevealBandWidth, 0.0, distToDot);
+              color.rgb += uRevealDotTint * dotIntensity;
+            }
+          }
+
           float dist = length(center - uCamPos);
           float fogFactor = clamp(exp(-uFogDensity * dist), 0.0, 1.0);
           color.rgb = mix(uFogColor, color.rgb, fogFactor);
@@ -1734,11 +1864,117 @@ function setupUnderwaterFog() {
         uniform uFogColor : vec3f;
         uniform uFogDensity : f32;
 
+        uniform uTime : f32;
+        uniform uRevealCenter : vec3f;
+        uniform uRevealSpeed : f32;
+        uniform uRevealDelay : f32;
+        uniform uRevealDotTint : vec3f;
+        uniform uRevealWaveTint : vec3f;
+        uniform uRevealOscillation : f32;
+        uniform uRevealEndRadius : f32;
+        uniform uRevealBandWidth : f32;
+
+        var<private> g_revealDist: f32;
+        var<private> g_revealDotWavePos: f32;
+        var<private> g_revealLiftTime: f32;
+        var<private> g_revealLiftWavePos: f32;
+
+        fn revealHash(p: vec3f) -> f32 {
+          return fract(sin(dot(p, vec3f(127.1, 311.7, 74.7))) * 43758.5453);
+        }
+
+        // uRevealEndRadius < 0 means "inactive" (see startRevealEffect) -
+        // every function below is a guaranteed no-op in that state, since
+        // g_revealDist (always >= 0) can never be within a negative radius.
         fn modifySplatCenter(center: ptr<function, vec3f>) {
+          g_revealDist = length(*center - uniform.uRevealCenter);
+          if (g_revealDist > uniform.uRevealEndRadius) {
+            return;
+          }
+
+          g_revealDotWavePos = uniform.uRevealSpeed * uniform.uTime;
+          g_revealLiftTime = max(0.0, uniform.uTime - uniform.uRevealDelay);
+          g_revealLiftWavePos = uniform.uRevealSpeed * g_revealLiftTime;
+
+          let wavesActive = g_revealLiftTime <= 0.0 || g_revealDist > g_revealLiftWavePos - 1.5 * uniform.uRevealBandWidth;
+          if (wavesActive) {
+            let phase = revealHash(*center) * 6.28318;
+            (*center).y += sin(uniform.uTime * 3.0 + phase) * uniform.uRevealOscillation * 0.25;
+          }
+
+          let distToLiftWave = abs(g_revealDist - g_revealLiftWavePos);
+          if (distToLiftWave < uniform.uRevealBandWidth && g_revealLiftTime > 0.0) {
+            let normalizedDist = distToLiftWave / uniform.uRevealBandWidth;
+            let liftAmount = (1.0 - normalizedDist) * sin(normalizedDist * 3.14159);
+            (*center).y += liftAmount * uniform.uRevealOscillation * 0.9;
+          }
         }
+
         fn modifySplatRotationScale(originalCenter: vec3f, modifiedCenter: vec3f, rotation: ptr<function, vec4f>, scale: ptr<function, vec3f>) {
+          if (g_revealDist > uniform.uRevealEndRadius) {
+            // Only while actively revealing (endRadius >= 0) does "beyond
+            // the wave" mean "not shown yet" - while inactive this must
+            // stay a no-op, not hide the whole model.
+            if (uniform.uRevealEndRadius >= 0.0) {
+              *scale = vec3f(0.0);
+            }
+            return;
+          }
+
+          let origScale = *scale;
+          let origSize = gsplatGetSizeFromScale(*scale);
+
+          var scaleFactor: f32;
+          let isLiftWave = g_revealLiftTime > 0.0 && g_revealLiftWavePos > g_revealDist;
+
+          if (isLiftWave) {
+            scaleFactor = select(
+              mix(0.1, 1.0, (g_revealLiftWavePos - g_revealDist) * 0.5),
+              1.0,
+              g_revealLiftWavePos >= g_revealDist + 2.0
+            );
+          } else if (g_revealDist > g_revealDotWavePos + 1.0) {
+            *scale = vec3f(0.0);
+            return;
+          } else if (g_revealDist > g_revealDotWavePos - 1.0) {
+            let distToWave = abs(g_revealDist - g_revealDotWavePos);
+            scaleFactor = select(
+              mix(0.0, 0.1, smoothstep(g_revealDotWavePos + 1.0, g_revealDotWavePos - 1.0, g_revealDist)),
+              mix(0.1, 0.2, 1.0 - distToWave * 2.0),
+              distToWave < 0.5
+            );
+          } else {
+            scaleFactor = 0.1;
+          }
+
+          if (scaleFactor >= 1.0) {
+            return;
+          } else if (isLiftWave) {
+            let t = (scaleFactor - 0.1) * 1.111111;
+            let dotSize = scaleFactor * 0.05;
+            let finalSize = mix(dotSize, origSize, t);
+            let sphericalScale = vec3f(finalSize);
+            let scaledOrig = origScale * scaleFactor;
+            *scale = mix(sphericalScale, scaledOrig, t);
+          } else {
+            let targetSize = min(scaleFactor * 0.05, origSize);
+            gsplatMakeSpherical(scale, targetSize);
+          }
         }
+
         fn modifySplatColor(center: vec3f, color: ptr<function, vec4f>) {
+          if (g_revealDist <= uniform.uRevealEndRadius) {
+            if (g_revealLiftTime > 0.0 && g_revealDist >= g_revealLiftWavePos - 1.5 * uniform.uRevealBandWidth && g_revealDist <= g_revealLiftWavePos + 0.5 * uniform.uRevealBandWidth) {
+              let distToLift = abs(g_revealDist - g_revealLiftWavePos);
+              let liftIntensity = smoothstep(1.5 * uniform.uRevealBandWidth, 0.0, distToLift);
+              (*color) = vec4f((*color).rgb + uniform.uRevealWaveTint * liftIntensity, (*color).a);
+            } else if (g_revealDist <= g_revealDotWavePos && (g_revealLiftTime <= 0.0 || g_revealDist > g_revealLiftWavePos + 0.5 * uniform.uRevealBandWidth)) {
+              let distToDot = abs(g_revealDist - g_revealDotWavePos);
+              let dotIntensity = smoothstep(uniform.uRevealBandWidth, 0.0, distToDot);
+              (*color) = vec4f((*color).rgb + uniform.uRevealDotTint * dotIntensity, (*color).a);
+            }
+          }
+
           let dist: f32 = length(center - uniform.uCamPos);
           let fogFactor: f32 = clamp(exp(-uniform.uFogDensity * dist), 0.0, 1.0);
           (*color) = vec4f(mix(uniform.uFogColor, (*color).rgb, fogFactor), (*color).a);
@@ -1748,28 +1984,46 @@ function setupUnderwaterFog() {
 
     gsplatMat.setParameter("uFogColor", FOG_COLOR);
     gsplatMat.setParameter("uFogDensity", FOG_DENSITY);
+    gsplatMat.setParameter("uRevealEndRadius", -1);
+    gsplatMat.setParameter("uRevealCenter", [0, 0, 0]);
+    gsplatMat.setParameter("uTime", 0);
+    gsplatMat.setParameter("uRevealSpeed", 1);
+    gsplatMat.setParameter("uRevealDelay", 0);
+    gsplatMat.setParameter("uRevealDotTint", REVEAL_DOT_TINT);
+    gsplatMat.setParameter("uRevealWaveTint", REVEAL_WAVE_TINT);
+    gsplatMat.setParameter("uRevealOscillation", 0);
+    gsplatMat.setParameter("uRevealBandWidth", 1);
     gsplatMat.update();
 
     fogSupported = true;
   } catch (e) {
-    console.warn("Underwater fog unavailable:", e);
+    console.warn("Underwater fog / reveal effect unavailable:", e);
   }
+}
+
+// Starts (or restarts) the reveal wave from the given splat's world-space
+// AABB center - endRadius/speed/band width/oscillation are all derived from
+// sceneRadius so the effect looks proportionally similar (and takes about
+// REVEAL_DURATION_SECONDS either way) whether the reef spans 2 units or 60.
+function startRevealEffect(splat, aabb, radius) {
+  if (!fogSupported) return; // shares the fog chunk - no chunk, no reveal
+
+  if (aabb) {
+    splat.getWorldTransform().transformPoint(aabb.center, revealCenter);
+  } else {
+    revealCenter.set(0, 0, 0);
+  }
+
+  revealEndRadius = Math.max(radius, MIN_SCENE_RADIUS) * 1.15;
+  revealSpeed = revealEndRadius / (REVEAL_DURATION_SECONDS - REVEAL_DELAY_SECONDS);
+  revealBandWidth = Math.max(revealEndRadius * 0.05, 0.05);
+  revealOscillation = revealEndRadius * 0.01;
+  revealStartTime = performance.now();
+  revealActive = true;
 }
 
 let currentSplatEntity = null;
 let currentSplatAsset = null;
-
-// Streamed SOG splats have no discrete "fully loaded" signal - LOD detail
-// keeps refining indefinitely based on camera distance/budget, so there's
-// no event to wait for that means "the first pass of tiles has streamed
-// in." This is a fixed approximation of that instead: on a timepoint swap
-// (not the very first load, where there's nothing to mask a transition
-// against yet), the loading overlay stays up this much longer after the
-// new splat's manifest resolves, so the block-by-block pop-in of its
-// initial tiles happens behind the loader instead of in full view. Tune
-// this if it's cutting the reveal too close (or holding it too long) once
-// there's a feel for real-world load times on deployed reefs.
-const TIMEPOINT_SWAP_SETTLE_MS = 2000;
 
 function loadTimepoint(url) {
   showLoader();
@@ -1815,7 +2069,7 @@ function loadTimepoint(url) {
 
     if (isFirstLoad) {
       hasLoadedOnce = true;
-      setupUnderwaterFog();
+      setupGsplatShaderEffects();
       if (!splatPose || !applyCameraPose(splatPose)) {
         frameSplat(splat, aabb);
       }
@@ -1829,12 +2083,34 @@ function loadTimepoint(url) {
       previousAsset.unload();
     }
 
-    if (isFirstLoad) {
-      hideLoader();
-    } else {
-      setLoadingState("Loading splat…", 1);
-      setTimeout(hideLoader, TIMEPOINT_SWAP_SETTLE_MS);
+    // Pin to the coarsest LOD level for a fast initial paint, then release
+    // it once frame:ready reports that level has actually finished
+    // streaming (a real signal, not a guess - see PlayCanvas's own
+    // gaussian-splatting/lod-streaming example). The reveal effect below
+    // covers up whatever pop-in still happens on top of that.
+    const gsplatComponent = splat.gsplat;
+    const lodLevels = resource?.octree?.lodLevels;
+    if (gsplatComponent && lodLevels) {
+      const worstLod = lodLevels - 1;
+      gsplatComponent.lodRangeMin = worstLod;
+      gsplatComponent.lodRangeMax = worstLod;
+
+      const onFrameReady = (cam, layer, ready, loadingCount) => {
+        if (cam === camera.camera && ready && !loadingCount) {
+          app.systems.gsplat.off("frame:ready", onFrameReady);
+          // Only release the pin if this load hasn't already been
+          // superseded by a later timepoint swap.
+          if (currentSplatEntity === splat) {
+            gsplatComponent.lodRangeMin = 0;
+            gsplatComponent.lodRangeMax = lodLevels - 1;
+          }
+        }
+      };
+      app.systems.gsplat.on("frame:ready", onFrameReady);
     }
+
+    startRevealEffect(splat, aabb, sceneRadius);
+    hideLoader();
   });
 
   app.assets.add(asset);
@@ -2057,11 +2333,36 @@ window.__debug = {
 app.on("update", () => {
   if (!fogSupported) return;
   try {
+    const gsplatMat = app.scene.gsplat.material;
+
     camPos.copy(cameraRig.getPosition());
-    app.scene.gsplat.material.setParameter("uCamPos", [camPos.x, camPos.y, camPos.z]);
-    app.scene.gsplat.material.update();
+    gsplatMat.setParameter("uCamPos", [camPos.x, camPos.y, camPos.z]);
+
+    if (revealActive) {
+      const effectTime = (performance.now() - revealStartTime) / 1000;
+      const completionTime = REVEAL_DELAY_SECONDS + revealEndRadius / revealSpeed;
+      if (effectTime >= completionTime) {
+        // Switch back off rather than leaving it frozen at its final
+        // state - see the "uRevealEndRadius < 0 means inactive" comment in
+        // setupGsplatShaderEffects.
+        revealActive = false;
+        gsplatMat.setParameter("uRevealEndRadius", -1);
+      } else {
+        gsplatMat.setParameter("uTime", effectTime);
+        gsplatMat.setParameter("uRevealCenter", [revealCenter.x, revealCenter.y, revealCenter.z]);
+        gsplatMat.setParameter("uRevealSpeed", revealSpeed);
+        gsplatMat.setParameter("uRevealDelay", REVEAL_DELAY_SECONDS);
+        gsplatMat.setParameter("uRevealDotTint", REVEAL_DOT_TINT);
+        gsplatMat.setParameter("uRevealWaveTint", REVEAL_WAVE_TINT);
+        gsplatMat.setParameter("uRevealOscillation", revealOscillation);
+        gsplatMat.setParameter("uRevealEndRadius", revealEndRadius);
+        gsplatMat.setParameter("uRevealBandWidth", revealBandWidth);
+      }
+    }
+
+    gsplatMat.update();
   } catch (e) {
-    console.warn("Underwater fog update failed:", e);
+    console.warn("Underwater fog / reveal effect update failed:", e);
     fogSupported = false;
   }
 });
