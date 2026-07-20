@@ -131,6 +131,24 @@
         "type": "Point",
         "coordinates": [-81.685921, 12.583849]
       }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "id": "dendrogyrareef",
+        "name": "Dendrogyra Reef",
+        "passwords": ["demo"],
+        "public": true,
+
+        "splats": {
+          "20220628": "https://pub-b8162e9594b146ac9f5b12262855c6b5.r2.dev/20220628_DCYLReef/streaming/lod-meta.json",
+          "20251106": "https://pub-b8162e9594b146ac9f5b12262855c6b5.r2.dev/20251106_DCYLReef/streaming/lod-meta.json"
+        }
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [-77.51628, 24.04557]
+      }
     }
   ]
 }

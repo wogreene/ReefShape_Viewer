@@ -253,9 +253,14 @@ map.on("click", "sites", e => {
   const id = feature.properties.id;
   const name = feature.properties.name;
 
-  // Reefs with a published 3D splat get the 2D/3D choice; others go straight to 2D.
-  if (feature.properties.splats) {
+  // Reefs with both a 2D orthomosaic and a published 3D splat get the
+  // choice; splats-only reefs (no timepoints, e.g. Dendrogyra Reef) skip
+  // straight to 3D instead of offering a "2D" option with no imagery
+  // behind it, and reefs with only an orthomosaic go straight to 2D as before.
+  if (feature.properties.splats && feature.properties.timepoints) {
     openViewChoiceModal(id, name);
+  } else if (feature.properties.splats) {
+    window.location.href = `splat.html?id=${id}`;
   } else {
     window.location.href = `viewer.html?id=${id}`;
   }
