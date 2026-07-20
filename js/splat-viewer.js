@@ -1412,9 +1412,17 @@ function updateVrButtonVisibility() {
   }
 }
 
+// Guards against a single click somehow reaching app.xr.start() twice
+// (e.g. a duplicate click event) before the first attempt has resolved
+// into either an active session or an "error" event - app.xr.active alone
+// doesn't cover that window, since it only flips true once the session
+// has actually started.
+let vrStarting = false;
+
 if (app.xr) {
   app.xr.on(`available:${XRTYPE_VR}`, updateVrButtonVisibility);
   app.xr.on("start", () => {
+    vrStarting = false;
     if (vrButton) vrButton.textContent = "Exit VR";
   });
   app.xr.on("end", () => {
@@ -1422,7 +1430,14 @@ if (app.xr) {
   });
   app.xr.on("error", error => {
     console.error("WebXR error:", error);
-    alert("Could not start the VR session.");
+    vrStarting = false;
+    // Surface the actual error text - "already an active, immersive
+    // XRSession" (thrown when another tab/page still holds a live or
+    // stuck session - immersive sessions are exclusive browser-wide, not
+    // per-tab) means something else, not this page, needs closing, and a
+    // generic "could not start" message would send someone straight back
+    // to devtools to find that out.
+    alert(`Could not start the VR session: ${error.message || error}`);
   });
 }
 updateVrButtonVisibility();
@@ -1433,6 +1448,7 @@ if (vrButton) {
       app.xr.end();
       return;
     }
+    if (vrStarting) return;
 
     const available = !!(app.xr && app.xr.supported && app.xr.isAvailable(XRTYPE_VR));
     if (!available && vrNeedsWebglForXr) {
@@ -1446,6 +1462,7 @@ if (vrButton) {
       return;
     }
 
+    vrStarting = true;
     app.xr.start(camera.camera, XRTYPE_VR, XRSPACE_LOCALFLOOR);
   });
 }
