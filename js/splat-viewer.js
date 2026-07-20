@@ -18,6 +18,11 @@ import {
   CameraComponentSystem,
   GSplatComponentSystem,
   RenderComponentSystem,
+  ScreenComponentSystem,
+  ElementComponentSystem,
+  ElementInput,
+  CanvasFont,
+  ELEMENTTYPE_TEXT,
   TextureHandler,
   GSplatHandler,
   Color,
@@ -198,8 +203,20 @@ device.maxPixelRatio = Math.min(window.devicePixelRatio || 1, 2);
 
 const createOptions = new AppOptions();
 createOptions.graphicsDevice = device;
-createOptions.componentSystems = [CameraComponentSystem, GSplatComponentSystem, RenderComponentSystem];
+createOptions.componentSystems = [
+  CameraComponentSystem,
+  GSplatComponentSystem,
+  RenderComponentSystem,
+  ScreenComponentSystem,
+  ElementComponentSystem
+];
 createOptions.resourceHandlers = [TextureHandler, GSplatHandler];
+// Screen/Element are for the in-VR timepoint menu (see "VR timepoint menu"
+// below) - it's world-space UI, not a DOM overlay, since a WebXR immersive
+// session takes over the display entirely and the existing HTML controls
+// simply aren't visible while it's active. XR-only (no mouse/touch): desktop
+// already has its own <select> for this, unrelated to ElementInput.
+createOptions.elementInput = new ElementInput(canvas, { useMouse: false, useTouch: false, useXr: true });
 // Without this, AppBase leaves app.xr null (AppOptions.xr is opt-in, not
 // automatic) - the VR button and everything in the "VR (WebXR)" section
 // below silently no-ops without ever throwing, since every use of app.xr
@@ -1321,6 +1338,7 @@ app.on("update", dt => {
 
   if (app.xr && app.xr.active) {
     updateVrLocomotion(dt);
+    updateVrMenuToggleInput();
   }
 
   // Orbit (right-drag/two-finger) and zoom (wheel/pinch) deltas accumulated
@@ -1796,6 +1814,134 @@ select.addEventListener("change", () => {
 
 loadTimepoint(splats[years[0]]);
 
+// --------------------------------------------------
+// VR timepoint menu
+//
+// Desktop has the <select> dropdown for this, but that's ordinary HTML and
+// isn't visible at all once an immersive XR session takes over the display
+// - so VR gets its own equivalent: a small world-space UI panel (Screen +
+// Element components, not a DOM overlay - see the elementInput/component
+// systems setup above) that the left controller's X button toggles,
+// spawned in front of wherever the headset is currently looking. Selecting
+// an entry calls the exact same loadTimepoint() the desktop dropdown does,
+// so it keeps the current viewpoint fixed and just swaps the splat asset,
+// identically to non-VR mode (see loadTimepoint's hasLoadedOnce check).
+// --------------------------------------------------
+
+const VR_MENU_ITEM_WIDTH = 340;
+const VR_MENU_ITEM_HEIGHT = 70;
+const VR_MENU_ITEM_GAP = 10;
+const VR_MENU_DISTANCE = 1.2; // meters in front of the headset when opened
+const VR_MENU_SCALE = 0.0018; // world meters per UI unit (world-space Screen)
+
+const vrMenuFont = new CanvasFont(app, {
+  fontName: "Arial",
+  fontSize: 64,
+  color: new Color(1, 1, 1),
+  width: 512,
+  height: 128
+});
+vrMenuFont.createTextures(years.join(""));
+
+const vrMenuScreen = new Entity("VrMenuScreen");
+vrMenuScreen.addComponent("screen", { screenSpace: false, referenceResolution: new Vec2(400, 400) });
+vrMenuScreen.setLocalScale(VR_MENU_SCALE, VR_MENU_SCALE, VR_MENU_SCALE);
+vrMenuScreen.enabled = false;
+app.root.addChild(vrMenuScreen);
+
+const VR_MENU_HIGHLIGHT_COLOR = new Color(0.4, 1, 0.5);
+const VR_MENU_DEFAULT_COLOR = new Color(1, 1, 1);
+
+const vrMenuItems = years.map((year, i) => {
+  const item = new Entity(`VrMenuItem_${year}`);
+  item.addComponent("element", {
+    type: ELEMENTTYPE_TEXT,
+    text: year,
+    font: vrMenuFont,
+    fontSize: 48,
+    color: VR_MENU_DEFAULT_COLOR,
+    width: VR_MENU_ITEM_WIDTH,
+    height: VR_MENU_ITEM_HEIGHT,
+    autoWidth: false,
+    autoHeight: false,
+    pivot: [0.5, 0.5],
+    anchor: [0.5, 0.5, 0.5, 0.5],
+    alignment: [0.5, 0.5],
+    useInput: true
+  });
+  const offsetFromCenter = (years.length - 1) / 2 - i;
+  item.setLocalPosition(0, offsetFromCenter * (VR_MENU_ITEM_HEIGHT + VR_MENU_ITEM_GAP), 0);
+  item.element.on("click", () => selectVrTimepoint(year));
+  vrMenuScreen.addChild(item);
+  return { year, entity: item };
+});
+
+function updateVrMenuHighlight() {
+  vrMenuItems.forEach(({ year, entity }) => {
+    entity.element.color = year === select.value ? VR_MENU_HIGHLIGHT_COLOR : VR_MENU_DEFAULT_COLOR;
+  });
+}
+
+function selectVrTimepoint(year) {
+  // Reselecting the already-loaded timepoint isn't a no-op the way it is
+  // for the desktop <select> (whose "change" event never fires unless the
+  // value actually changes) - loadTimepoint always creates a fresh Asset
+  // and tears down the previous one, and doing that to itself leaves the
+  // splat blank. Guard against it explicitly.
+  if (year !== select.value) {
+    select.value = year; // keep the desktop dropdown in sync
+    loadTimepoint(splats[year]);
+  }
+  vrMenuScreen.enabled = false;
+  updateVrMenuHighlight();
+}
+
+const vrMenuPosition = new Vec3();
+const vrMenuLookTarget = new Vec3();
+
+function openVrMenu() {
+  vrMenuPosition.copy(camera.getPosition()).addScaled(camera.forward, VR_MENU_DISTANCE);
+  vrMenuScreen.setPosition(vrMenuPosition);
+  vrMenuLookTarget.copy(camera.getPosition());
+  vrMenuScreen.lookAt(vrMenuLookTarget);
+  // World-space UI renders on an Element's local +Z face, the opposite of
+  // the usual "-Z is forward" convention lookAt orients toward its target -
+  // without this the panel would face away from whoever it was just aimed
+  // at.
+  vrMenuScreen.rotateLocal(0, 180, 0);
+  updateVrMenuHighlight();
+  vrMenuScreen.enabled = true;
+}
+
+function toggleVrMenu() {
+  if (vrMenuScreen.enabled) {
+    vrMenuScreen.enabled = false;
+  } else {
+    openVrMenu();
+  }
+}
+
+let vrMenuButtonWasPressed = false;
+function updateVrMenuToggleInput() {
+  const gamepad = vrLeftInput && vrLeftInput.gamepad;
+  const buttons = gamepad && gamepad.buttons;
+  // Button 4 is the left controller's X button under the xr-standard
+  // gamepad mapping (0 trigger, 1 grip, 3 thumbstick click, 4 X, 5 Y) -
+  // edge-detected so a held button only toggles once, not every frame.
+  const pressed = !!(buttons && buttons[4] && buttons[4].pressed);
+  if (pressed && !vrMenuButtonWasPressed) {
+    toggleVrMenu();
+  }
+  vrMenuButtonWasPressed = pressed;
+}
+
+if (app.xr) {
+  app.xr.on("end", () => {
+    vrMenuScreen.enabled = false;
+    vrMenuButtonWasPressed = false;
+  });
+}
+
 window.__debug = {
   getYaw: () => pose.angles.y,
   getPitch: () => -pose.angles.x,
@@ -1813,7 +1959,22 @@ window.__debug = {
     available: !!(app.xr && app.xr.isAvailable(XRTYPE_VR)),
     active: !!(app.xr && app.xr.active),
     controllers: { left: !!vrLeftInput, right: !!vrRightInput }
-  })
+  }),
+  vrMenu: {
+    open: () => openVrMenu(),
+    close: () => { vrMenuScreen.enabled = false; },
+    select: year => selectVrTimepoint(year),
+    isOpen: () => vrMenuScreen.enabled,
+    getItems: () => vrMenuItems.map(({ year, entity }) => ({
+      year,
+      position: entity.getPosition().clone(),
+      color: entity.element.color.clone()
+    })),
+    getScreenTransform: () => ({
+      position: vrMenuScreen.getPosition().clone(),
+      forward: vrMenuScreen.forward.clone()
+    })
+  }
 };
 
 app.on("update", () => {
