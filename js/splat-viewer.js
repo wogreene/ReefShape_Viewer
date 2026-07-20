@@ -34,6 +34,7 @@ import {
   XrManager,
   XRTYPE_VR,
   XRSPACE_LOCALFLOOR,
+  XRSPACE_LOCAL,
   PROJECTION_ORTHOGRAPHIC,
   PROJECTION_PERSPECTIVE,
   StandardMaterial,
@@ -1428,19 +1429,42 @@ if (app.xr) {
   app.xr.on("end", () => {
     if (vrButton) vrButton.textContent = "Enter VR";
   });
-  app.xr.on("error", error => {
-    console.error("WebXR error:", error);
-    vrStarting = false;
-    // Surface the actual error text - "already an active, immersive
-    // XRSession" (thrown when another tab/page still holds a live or
-    // stuck session - immersive sessions are exclusive browser-wide, not
-    // per-tab) means something else, not this page, needs closing, and a
-    // generic "could not start" message would send someone straight back
-    // to devtools to find that out.
-    alert(`Could not start the VR session: ${error.message || error}`);
-  });
+  // Logging only - user-facing alerting for a failed start happens in
+  // startVrSession's own callback below, which (unlike this event) knows
+  // whether the failure is the expected/retried local-floor case or a
+  // genuine dead end. This event also fires for other error sources (e.g.
+  // the availability probe above), where alerting would be noise anyway.
+  app.xr.on("error", error => console.error("WebXR error:", error));
 }
 updateVrButtonVisibility();
+
+// "local-floor" (real-world floor as origin) isn't guaranteed by every XR
+// runtime - it failed outright on the runtime this was tested against over
+// Air Link ("NotSupportedError: The specified session configuration is not
+// supported"), even with a headset that otherwise works fine. "local"
+// (origin at wherever the headset was when the session started) is the one
+// reference space every immersive-vr session must support per spec, so
+// retry with that on failure rather than giving up. The practical
+// difference barely matters for this app - there's no walkable "floor" in
+// an underwater scene, camera height is already fully controlled by our
+// own pose/navigation rather than real-world floor calibration.
+function startVrSession(spaceType) {
+  vrStarting = true;
+  app.xr.start(camera.camera, XRTYPE_VR, spaceType, {
+    callback: err => {
+      if (!err) return; // succeeded - the "start" event above handles the rest
+      if (spaceType === XRSPACE_LOCALFLOOR) {
+        startVrSession(XRSPACE_LOCAL);
+        return;
+      }
+      vrStarting = false;
+      // "already an active, immersive XRSession" here means something
+      // else - another tab/page holding a live or stuck session, since
+      // immersive sessions are exclusive browser-wide - needs closing.
+      alert(`Could not start the VR session: ${err.message || err}`);
+    }
+  });
+}
 
 if (vrButton) {
   vrButton.addEventListener("click", () => {
@@ -1462,8 +1486,7 @@ if (vrButton) {
       return;
     }
 
-    vrStarting = true;
-    app.xr.start(camera.camera, XRTYPE_VR, XRSPACE_LOCALFLOOR);
+    startVrSession(XRSPACE_LOCALFLOOR);
   });
 }
 
