@@ -1701,10 +1701,12 @@ async function vrTriggerRecenter(inputSource) {
 //
 // The reveal effect masks the block-by-block pop-in of a freshly (re)loaded
 // splat's initial streamed tiles with a deliberate animated wave instead - a
-// wave of tinted dots washes out from the model's center, followed by a
-// lift wave that settles each splat into its real shape/color - rather than
-// splats just appearing wherever their LOD tile happens to finish
-// downloading. Ported from PlayCanvas's own GSplatRevealRadial script
+// wave of tinted dots washes out from wherever the camera is currently
+// looking (see startRevealEffect), followed by a lift wave that settles
+// each splat into its real shape/color - rather than splats just appearing
+// wherever their LOD tile happens to finish downloading, or the wave
+// emanating from a model-center point that might not even be on screen.
+// Ported from PlayCanvas's own GSplatRevealRadial script
 // (playcanvas/scripts/esm/gsplat/reveal-radial.mjs, see the
 // gaussian-splatting/lod-streaming example) rather than used directly,
 // since that script's base class manages the gsplatModifyVS/gsplatModifyPS
@@ -1727,7 +1729,7 @@ const REVEAL_WAVE_TINT = [1.5, 1.8, 2.0];
 // Total time from load to fully revealed, independent of scene scale (see
 // startRevealEffect, which derives speed/endRadius from sceneRadius so a
 // tiny reef and a huge one both take about this long).
-const REVEAL_DURATION_SECONDS = 2.2;
+const REVEAL_DURATION_SECONDS = 3.2;
 const REVEAL_DELAY_SECONDS = 0.3; // gap between the dot wave and the lift wave starting
 
 const revealCenter = new Vec3();
@@ -2001,18 +2003,19 @@ function setupGsplatShaderEffects() {
   }
 }
 
-// Starts (or restarts) the reveal wave from the given splat's world-space
-// AABB center - endRadius/speed/band width/oscillation are all derived from
-// sceneRadius so the effect looks proportionally similar (and takes about
-// REVEAL_DURATION_SECONDS either way) whether the reef spans 2 units or 60.
-function startRevealEffect(splat, aabb, radius) {
+// Starts (or restarts) the reveal wave from wherever the camera is
+// currently looking (pose.getFocus() - the exact point at screen center
+// right now) rather than the splat's own geometric center, which could be
+// far outside the current view entirely on a large reef - the wave should
+// wash out from what the user is actually looking at, not from a point
+// that might not even be on screen. endRadius/speed/band width/oscillation
+// are all derived from sceneRadius so the effect looks proportionally
+// similar (and takes about REVEAL_DURATION_SECONDS either way) whether the
+// reef spans 2 units or 60.
+function startRevealEffect(radius) {
   if (!fogSupported) return; // shares the fog chunk - no chunk, no reveal
 
-  if (aabb) {
-    splat.getWorldTransform().transformPoint(aabb.center, revealCenter);
-  } else {
-    revealCenter.set(0, 0, 0);
-  }
+  pose.getFocus(revealCenter);
 
   revealEndRadius = Math.max(radius, MIN_SCENE_RADIUS) * 1.15;
   revealSpeed = revealEndRadius / (REVEAL_DURATION_SECONDS - REVEAL_DELAY_SECONDS);
@@ -2109,7 +2112,7 @@ function loadTimepoint(url) {
       app.systems.gsplat.on("frame:ready", onFrameReady);
     }
 
-    startRevealEffect(splat, aabb, sceneRadius);
+    startRevealEffect(sceneRadius);
     hideLoader();
   });
 
