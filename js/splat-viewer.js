@@ -1337,7 +1337,14 @@ app.on("update", dt => {
   }
 
   if (app.xr && app.xr.active) {
-    updateVrLocomotion(dt);
+    // Flight is suspended while the menu is open - the left stick is
+    // repurposed for menu navigation instead (see updateVrMenuNavigationInput),
+    // and flying around while browsing a menu would just be disorienting.
+    if (vrMenuScreen.enabled) {
+      updateVrMenuNavigationInput();
+    } else {
+      updateVrLocomotion(dt);
+    }
     updateVrMenuToggleInput();
   }
 
@@ -1544,13 +1551,21 @@ if (app.xr) {
       vrLeftInput = inputSource;
     } else if (inputSource.handedness === "right") {
       vrRightInput = inputSource;
-      // Right trigger: recenter on wherever the controller is pointing,
-      // the same "fly to and orbit around this point" behavior as a
-      // desktop click (see clickToCenter/recenterOn) - just aimed with the
-      // controller's ray instead of the mouse. "select" fires on a full
-      // press-and-release, matching a "point, then commit" click rather
-      // than firing the instant the trigger is first touched.
-      inputSource.on("select", () => vrTriggerRecenter(inputSource));
+      // Right trigger: while the VR timepoint menu is open, confirms
+      // whichever item the left stick has highlighted (see
+      // updateVrMenuNavigationInput) - otherwise, recenters on wherever the
+      // controller is pointing, the same "fly to and orbit around this
+      // point" behavior as a desktop click (see clickToCenter/recenterOn),
+      // just aimed with the controller's ray instead of the mouse. "select"
+      // fires on a full press-and-release, matching a "point, then commit"
+      // click rather than firing the instant the trigger is first touched.
+      inputSource.on("select", () => {
+        if (vrMenuScreen.enabled) {
+          selectVrTimepoint(vrMenuItems[vrMenuSelectedIndex].year);
+        } else {
+          vrTriggerRecenter(inputSource);
+        }
+      });
     }
 
     inputSource.on("remove", () => {
@@ -1744,6 +1759,18 @@ function setupUnderwaterFog() {
 let currentSplatEntity = null;
 let currentSplatAsset = null;
 
+// Streamed SOG splats have no discrete "fully loaded" signal - LOD detail
+// keeps refining indefinitely based on camera distance/budget, so there's
+// no event to wait for that means "the first pass of tiles has streamed
+// in." This is a fixed approximation of that instead: on a timepoint swap
+// (not the very first load, where there's nothing to mask a transition
+// against yet), the loading overlay stays up this much longer after the
+// new splat's manifest resolves, so the block-by-block pop-in of its
+// initial tiles happens behind the loader instead of in full view. Tune
+// this if it's cutting the reveal too close (or holding it too long) once
+// there's a feel for real-world load times on deployed reefs.
+const TIMEPOINT_SWAP_SETTLE_MS = 2000;
+
 function loadTimepoint(url) {
   showLoader();
   setLoadingState("Loading splat…", 0);
@@ -1774,6 +1801,7 @@ function loadTimepoint(url) {
 
     const previousEntity = currentSplatEntity;
     const previousAsset = currentSplatAsset;
+    const isFirstLoad = !hasLoadedOnce;
 
     currentSplatEntity = splat;
     currentSplatAsset = asset;
@@ -1785,7 +1813,7 @@ function loadTimepoint(url) {
       updateZoomRange();
     }
 
-    if (!hasLoadedOnce) {
+    if (isFirstLoad) {
       hasLoadedOnce = true;
       setupUnderwaterFog();
       if (!splatPose || !applyCameraPose(splatPose)) {
@@ -1801,7 +1829,12 @@ function loadTimepoint(url) {
       previousAsset.unload();
     }
 
-    hideLoader();
+    if (isFirstLoad) {
+      hideLoader();
+    } else {
+      setLoadingState("Loading splat…", 1);
+      setTimeout(hideLoader, TIMEPOINT_SWAP_SETTLE_MS);
+    }
   });
 
   app.assets.add(asset);
@@ -1871,15 +1904,30 @@ const vrMenuItems = years.map((year, i) => {
   });
   const offsetFromCenter = (years.length - 1) / 2 - i;
   item.setLocalPosition(0, offsetFromCenter * (VR_MENU_ITEM_HEIGHT + VR_MENU_ITEM_GAP), 0);
+  // Ray+trigger click via ElementInput's native XR support - left wired in
+  // case it works on some setups, but unreliable in practice (same class of
+  // issue as the right-trigger recenter ray-pick), so it's a bonus path,
+  // not the supported one - see updateVrMenuNavigationInput below for that.
   item.element.on("click", () => selectVrTimepoint(year));
   vrMenuScreen.addChild(item);
   return { year, entity: item };
 });
 
+// Cursor-based selection: left stick up/down moves this between items,
+// right trigger confirms - the supported way to use the menu, since
+// pointing a ray at a specific Element and clicking it turned out to be
+// unreliable (see the comment on the "click" listener above).
+let vrMenuSelectedIndex = 0;
+
 function updateVrMenuHighlight() {
-  vrMenuItems.forEach(({ year, entity }) => {
-    entity.element.color = year === select.value ? VR_MENU_HIGHLIGHT_COLOR : VR_MENU_DEFAULT_COLOR;
+  vrMenuItems.forEach(({ entity }, i) => {
+    entity.element.color = i === vrMenuSelectedIndex ? VR_MENU_HIGHLIGHT_COLOR : VR_MENU_DEFAULT_COLOR;
   });
+}
+
+function moveVrMenuSelection(delta) {
+  vrMenuSelectedIndex = (vrMenuSelectedIndex + delta + vrMenuItems.length) % vrMenuItems.length;
+  updateVrMenuHighlight();
 }
 
 function selectVrTimepoint(year) {
@@ -1909,6 +1957,9 @@ function openVrMenu() {
   // without this the panel would face away from whoever it was just aimed
   // at.
   vrMenuScreen.rotateLocal(0, 180, 0);
+  // Start the cursor on whichever timepoint is currently loaded.
+  const currentIndex = years.indexOf(select.value);
+  vrMenuSelectedIndex = currentIndex === -1 ? 0 : currentIndex;
   updateVrMenuHighlight();
   vrMenuScreen.enabled = true;
 }
@@ -1935,10 +1986,33 @@ function updateVrMenuToggleInput() {
   vrMenuButtonWasPressed = pressed;
 }
 
+// While the menu is open, the left stick moves the highlighted item instead
+// of flying (see the update loop, which calls this in place of
+// updateVrLocomotion whenever vrMenuScreen.enabled) - one step per push,
+// re-armed once the stick returns near center, same debounce idea as the
+// old snap-turn.
+let vrMenuStickArmed = true;
+function updateVrMenuNavigationInput() {
+  const left = readVrStick(vrLeftInput);
+  if (!left) return;
+
+  if (Math.abs(left.y) > 0.6) {
+    if (vrMenuStickArmed) {
+      // Stick "up" (forward, away from the thumb) is negative y - move to
+      // the previous (higher, per how items are laid out) item.
+      moveVrMenuSelection(left.y < 0 ? -1 : 1);
+      vrMenuStickArmed = false;
+    }
+  } else if (Math.abs(left.y) < 0.3) {
+    vrMenuStickArmed = true;
+  }
+}
+
 if (app.xr) {
   app.xr.on("end", () => {
     vrMenuScreen.enabled = false;
     vrMenuButtonWasPressed = false;
+    vrMenuStickArmed = true;
   });
 }
 
@@ -1973,7 +2047,10 @@ window.__debug = {
     getScreenTransform: () => ({
       position: vrMenuScreen.getPosition().clone(),
       forward: vrMenuScreen.forward.clone()
-    })
+    }),
+    getSelectedIndex: () => vrMenuSelectedIndex,
+    moveSelection: delta => moveVrMenuSelection(delta),
+    confirmSelection: () => selectVrTimepoint(vrMenuItems[vrMenuSelectedIndex].year)
   }
 };
 
