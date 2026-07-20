@@ -180,8 +180,16 @@ function hideLoader() {
 // PlayCanvas app setup
 // --------------------------------------------------
 
+// WebXR immersive sessions currently require WebGL - a WebGPU device needs
+// XRGPUBinding, which isn't broadly supported yet, so PlayCanvas's own XR
+// availability check (see the VR section below) reports VR as unavailable
+// on WebGPU regardless of whether a headset is actually connected. Once the
+// VR button's own WebGPU-detection flow (below) has the user opt into
+// WebGL for a VR session, this flag makes that choice stick across the
+// reload it triggers - otherwise we'd just pick WebGPU again and loop.
+const forceWebglForXr = sessionStorage.getItem("reefshape_force_webgl") === "1";
 const device = await createGraphicsDevice(canvas, {
-  deviceTypes: [DEVICETYPE_WEBGPU, DEVICETYPE_WEBGL2],
+  deviceTypes: forceWebglForXr ? [DEVICETYPE_WEBGL2] : [DEVICETYPE_WEBGPU, DEVICETYPE_WEBGL2],
   // Gaussian splats don't benefit from antialiasing and it's expensive.
   antialias: false
 });
@@ -1374,14 +1382,34 @@ if (controlsHelpButton && controlsModal) {
 // starts - that's exactly why `camera` is a child of `cameraRig` rather
 // than being moved directly: our orbit/pan/WASD logic keeps controlling
 // where the rig stands in the scene, headset tracking handles the rest.
+//
+// app.xr.isAvailable() reports false on a WebGPU device even with a
+// perfectly good headset connected (see the forceWebglForXr comment above -
+// XRGPUBinding isn't broadly supported yet, and PlayCanvas's own
+// availability check accounts for that). Rather than just hiding the button
+// in that case, separately probe the browser's raw, renderer-agnostic
+// isSessionSupported() - if that says a session really would work, offer to
+// reload with WebGL forced instead of leaving the button silently missing.
+// Matches Supersplat's viewer, which hits the same WebGPU/XR gap.
 // --------------------------------------------------
 
 const vrButton = document.getElementById("vrButton");
+let vrNeedsWebglForXr = false;
+
+if (device.isWebGPU && navigator.xr) {
+  navigator.xr.isSessionSupported(XRTYPE_VR).then(supported => {
+    vrNeedsWebglForXr = supported;
+    updateVrButtonVisibility();
+  }).catch(() => {});
+}
 
 function updateVrButtonVisibility() {
   if (!vrButton) return;
   const available = !!(app.xr && app.xr.supported && app.xr.isAvailable(XRTYPE_VR));
-  vrButton.style.display = available ? "inline-block" : "none";
+  vrButton.style.display = available || vrNeedsWebglForXr ? "inline-block" : "none";
+  if (!(app.xr && app.xr.active)) {
+    vrButton.textContent = available ? "Enter VR" : "Enter VR (needs WebGL)";
+  }
 }
 
 if (app.xr) {
@@ -1403,9 +1431,22 @@ if (vrButton) {
   vrButton.addEventListener("click", () => {
     if (app.xr.active) {
       app.xr.end();
-    } else {
-      app.xr.start(camera.camera, XRTYPE_VR, XRSPACE_LOCALFLOOR);
+      return;
     }
+
+    const available = !!(app.xr && app.xr.supported && app.xr.isAvailable(XRTYPE_VR));
+    if (!available && vrNeedsWebglForXr) {
+      const reload = confirm(
+        "VR needs the WebGL renderer - this browser doesn't yet support VR on WebGPU.\n\nReload the viewer with WebGL to enter VR?"
+      );
+      if (reload) {
+        sessionStorage.setItem("reefshape_force_webgl", "1");
+        window.location.reload();
+      }
+      return;
+    }
+
+    app.xr.start(camera.camera, XRTYPE_VR, XRSPACE_LOCALFLOOR);
   });
 }
 
