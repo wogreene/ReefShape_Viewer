@@ -1010,17 +1010,12 @@ function startRecenterAnimation(endPosition, endDistance, referenceViewDistance)
   };
 }
 
-async function clickToCenter(screenX, screenY) {
-  if (!camera.camera) return;
-
-  const rect = canvas.getBoundingClientRect();
-  const x = screenX - rect.left;
-  const y = screenY - rect.top;
-
-  picker.resize(rect.width, rect.height);
-  picker.prepare(camera.camera, app.scene, [app.scene.layers.getLayerByName("World")]);
-  const hitPoint = await picker.getWorldPointAsync(x, y);
-  if (!hitPoint) return; // click missed all geometry (e.g. background/open water)
+// Shared by clickToCenter (mouse/touch, screen-space) and vrTriggerRecenter
+// (right controller ray, see the "VR controller locomotion" section below)
+// - both resolve to a world-space hitPoint one way or another and then do
+// the exact same "fly to and orbit around this point" recenter.
+function recenterOn(hitPoint) {
+  if (!hitPoint) return; // missed all geometry (e.g. background/open water)
 
   const oldViewDistance = viewDistance;
   let endDistance = pose.distance;
@@ -1052,6 +1047,18 @@ async function clickToCenter(screenX, screenY) {
 
   showClickMarker(hitPoint);
   startRecenterAnimation(recenterEndPosition, endDistance, oldViewDistance);
+}
+
+async function clickToCenter(screenX, screenY) {
+  if (!camera.camera) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = screenX - rect.left;
+  const y = screenY - rect.top;
+
+  picker.resize(rect.width, rect.height);
+  picker.prepare(camera.camera, app.scene, [app.scene.layers.getLayerByName("World")]);
+  recenterOn(await picker.getWorldPointAsync(x, y));
 }
 
 function touchCenterAndDist(activePointers) {
@@ -1495,33 +1502,38 @@ if (vrButton) {
 //
 // Left thumbstick: fly forward/strafe, relative to wherever the headset is
 // actually looking right now (camera.forward/right - the real-time tracked
-// direction, not just the rig's yaw, which only changes on a snap-turn) -
+// direction, not just the rig's yaw, which only changes on a turn) -
 // flattened the same way WASD's flatForward is (see updateFlatBasis), so
 // glancing down doesn't turn "forward" into "dive".
 // Right thumbstick Y: climb/dive along world-up, ignoring head tilt - same
 // reasoning as Q/E on desktop (see the `lift` line below in the update
 // loop): pushing the stick shouldn't do something different depending on
 // which way you happen to be looking.
-// Right thumbstick X: snap-turns the rig by VR_SNAP_TURN_DEGREES rather
-// than turning smoothly, since smooth rotation stacked on smooth
-// translation is one of the more nausea-inducing VR combinations - this is
-// the standard "VR comfort" default. All of this is just tunable constants
-// below if a different feel is wanted (e.g. set VR_SNAP_TURN_DEGREES to a
-// smaller value for finer snaps, or swap which stick drives which axis).
+// Right thumbstick X: turns the rig continuously at VR_TURN_DEGREES_PER_SECOND
+// (scaled by how far the stick is pushed).
+// All tunable via the constants below.
 // --------------------------------------------------
 
 const VR_STICK_DEADZONE = 0.15;
-const VR_SNAP_TURN_DEGREES = 30;
-const VR_SNAP_TURN_REARM_THRESHOLD = 0.4; // stick must return this close to center before the next snap can fire
+const VR_TURN_DEGREES_PER_SECOND = 90;
 
 let vrLeftInput = null;
 let vrRightInput = null;
-let vrSnapTurnArmed = true;
 
 if (app.xr) {
   app.xr.input.on("add", inputSource => {
-    if (inputSource.handedness === "left") vrLeftInput = inputSource;
-    else if (inputSource.handedness === "right") vrRightInput = inputSource;
+    if (inputSource.handedness === "left") {
+      vrLeftInput = inputSource;
+    } else if (inputSource.handedness === "right") {
+      vrRightInput = inputSource;
+      // Right trigger: recenter on wherever the controller is pointing,
+      // the same "fly to and orbit around this point" behavior as a
+      // desktop click (see clickToCenter/recenterOn) - just aimed with the
+      // controller's ray instead of the mouse. "select" fires on a full
+      // press-and-release, matching a "point, then commit" click rather
+      // than firing the instant the trigger is first touched.
+      inputSource.on("select", () => vrTriggerRecenter(inputSource));
+    }
 
     inputSource.on("remove", () => {
       if (vrLeftInput === inputSource) vrLeftInput = null;
@@ -1534,11 +1546,9 @@ if (app.xr) {
   app.xr.on("end", () => {
     vrLeftInput = null;
     vrRightInput = null;
-    vrSnapTurnArmed = true;
   });
 }
 
-const vrStickResult = { x: 0, y: 0 };
 function readVrStick(inputSource) {
   const gamepad = inputSource && inputSource.gamepad;
   const axes = gamepad && gamepad.axes;
@@ -1547,12 +1557,17 @@ function readVrStick(inputSource) {
   // The xr-standard gamepad mapping reports the thumbstick at axes[2]/[3]
   // (axes[0]/[1] are the touchpad - always 0 on Quest Touch controllers,
   // which don't have one). Controllers that only ever expose two axes
-  // total report the stick at [0]/[1] instead.
+  // total report the stick at [0]/[1] instead. Returns a fresh object each
+  // call (rather than a shared scratch one) - readVrStick is called once
+  // per controller per frame and both results are read back together
+  // below, so a shared/reused return value would have the second call
+  // silently clobber the first's.
   const x = axes.length >= 4 ? axes[2] : axes[0];
   const y = axes.length >= 4 ? axes[3] : axes[1];
-  vrStickResult.x = Math.abs(x) > VR_STICK_DEADZONE ? x : 0;
-  vrStickResult.y = Math.abs(y) > VR_STICK_DEADZONE ? y : 0;
-  return vrStickResult;
+  return {
+    x: Math.abs(x) > VR_STICK_DEADZONE ? x : 0,
+    y: Math.abs(y) > VR_STICK_DEADZONE ? y : 0
+  };
 }
 
 const vrFlatForward = new Vec3();
@@ -1588,14 +1603,43 @@ function updateVrLocomotion(dt) {
     translateCamera(vrMove, { moveZoomTarget: true, trackHeightChange: true });
   }
 
-  if (right) {
-    if (vrSnapTurnArmed && Math.abs(right.x) > 0.6) {
-      appendOrbitRotate(Math.sign(right.x) * VR_SNAP_TURN_DEGREES, 0);
-      vrSnapTurnArmed = false;
-    } else if (Math.abs(right.x) < VR_SNAP_TURN_REARM_THRESHOLD) {
-      vrSnapTurnArmed = true;
-    }
+  if (right && right.x !== 0) {
+    appendOrbitRotate(right.x * VR_TURN_DEGREES_PER_SECOND * dt, 0);
   }
+}
+
+// A permanently-existing, never-visibly-rendered camera used solely to turn
+// an arbitrary world-space ray (the right controller's pointer) into a
+// pick - the Picker can only sample through an actual camera's projection,
+// there's no direct "pick along this ray" API, so this camera is aimed
+// along the ray and the picker is sampled at its exact center instead.
+const rayPickCamera = new Entity("RayPickCamera");
+rayPickCamera.addComponent("camera", { enabled: false, fov: 1 });
+app.root.addChild(rayPickCamera);
+const rayPickTarget = new Vec3();
+
+async function pickWorldPointFromRay(origin, direction) {
+  rayPickCamera.setPosition(origin);
+  rayPickTarget.copy(origin).add(direction);
+  rayPickCamera.lookAt(rayPickTarget);
+  // Copied fresh each call rather than once at creation - updateZoomRange
+  // adjusts the main camera's clip planes once the splat's real scene
+  // radius is known (well after this entity is created), and this should
+  // always see the same range the main camera does.
+  rayPickCamera.camera.nearClip = camera.camera.nearClip;
+  rayPickCamera.camera.farClip = camera.camera.farClip;
+
+  // 3x3 rather than 1x1/2x2 so there's an exact, unambiguous center pixel.
+  picker.resize(3, 3);
+  picker.prepare(rayPickCamera.camera, app.scene, [app.scene.layers.getLayerByName("World")]);
+  return picker.getWorldPointAsync(1, 1);
+}
+
+async function vrTriggerRecenter(inputSource) {
+  const origin = inputSource.getOrigin();
+  const direction = inputSource.getDirection();
+  if (!origin || !direction) return;
+  recenterOn(await pickWorldPointFromRay(origin, direction));
 }
 
 // --------------------------------------------------
