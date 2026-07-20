@@ -143,6 +143,11 @@
         "splats": {
           "20220628": "https://pub-b8162e9594b146ac9f5b12262855c6b5.r2.dev/20220628_DCYLReef/streaming/lod-meta.json",
           "20251106": "https://pub-b8162e9594b146ac9f5b12262855c6b5.r2.dev/20251106_DCYLReef/streaming/lod-meta.json"
+        },
+        "splatPose": {
+          "position": [-1.5314836072781532, -0.5236140614756146, 1.1604665905379188],
+          "target": [-2.9397329437563666, -1.5236140614756146, 0.1520848144686211],
+          "fov": 75
         }
       },
       "geometry": {
