@@ -2006,7 +2006,14 @@ function setupVrVignette() {
     vrVignetteMaterial = null;
   }
 }
-setupVrVignette();
+// Temporarily off: the VR timepoint menu is invisible (though still
+// functional - stick nav + trigger still switch timepoints fine) whenever
+// the comfort vignette exists in the scene, even excluding its layer from
+// the camera while the menu is open didn't fix it (see git history) - so
+// disabling vignette creation entirely here isolates whether it's really
+// the cause before trying anything else.
+const VR_VIGNETTE_ENABLED = false;
+if (VR_VIGNETTE_ENABLED) setupVrVignette();
 
 // Runs every frame regardless of XR/menu state (unlike updateVrLocomotion,
 // which only sets the *target* intensity, and only while actively flying)
