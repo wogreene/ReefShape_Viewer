@@ -21,8 +21,7 @@ import {
   ScreenComponentSystem,
   ElementComponentSystem,
   ElementInput,
-  CanvasFont,
-  ELEMENTTYPE_TEXT,
+  ELEMENTTYPE_IMAGE,
   TextureHandler,
   GSplatHandler,
   Color,
@@ -1943,6 +1942,16 @@ function createVrVignetteTexture() {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, size, size);
 
+  // Pixel data (via getImageData), not the canvas element itself, as the
+  // texture source - passing a <canvas> straight to a WebGL texture upload
+  // triggers Chromium's GPU-to-GPU "shared image"/mailbox fast path on some
+  // Android GPU configurations (Quest's browser included), which can fail
+  // outright (GL_INVALID_OPERATION "texture is not a shared image" /
+  // "invalid mailbox name") and leave the texture blank - functionally
+  // fine, just invisible. A plain typed-array upload goes through the
+  // ordinary CPU-to-GPU path instead, sidestepping that entirely.
+  const imageData = ctx.getImageData(0, 0, size, size);
+
   return new Texture(app.graphicsDevice, {
     name: "VrVignette",
     width: size,
@@ -1953,7 +1962,7 @@ function createVrVignetteTexture() {
     magFilter: FILTER_LINEAR,
     addressU: ADDRESS_CLAMP_TO_EDGE,
     addressV: ADDRESS_CLAMP_TO_EDGE,
-    levels: [canvas]
+    levels: [imageData.data]
   });
 }
 
@@ -2006,14 +2015,7 @@ function setupVrVignette() {
     vrVignetteMaterial = null;
   }
 }
-// Temporarily off: the VR timepoint menu is invisible (though still
-// functional - stick nav + trigger still switch timepoints fine) whenever
-// the comfort vignette exists in the scene, even excluding its layer from
-// the camera while the menu is open didn't fix it (see git history) - so
-// disabling vignette creation entirely here isolates whether it's really
-// the cause before trying anything else.
-const VR_VIGNETTE_ENABLED = false;
-if (VR_VIGNETTE_ENABLED) setupVrVignette();
+setupVrVignette();
 
 // Runs every frame regardless of XR/menu state (unlike updateVrLocomotion,
 // which only sets the *target* intensity, and only while actively flying)
@@ -2531,14 +2533,45 @@ const VR_MENU_ITEM_GAP = 10;
 const VR_MENU_DISTANCE = 1.2; // meters in front of the headset when opened
 const VR_MENU_SCALE = 0.0018; // world meters per UI unit (world-space Screen)
 
-const vrMenuFont = new CanvasFont(app, {
-  fontName: "Arial",
-  fontSize: 64,
-  color: new Color(1, 1, 1),
-  width: 512,
-  height: 128
-});
-vrMenuFont.createTextures(years.join(""));
+// Renders a menu label to a texture by hand rather than using PlayCanvas's
+// CanvasFont (ELEMENTTYPE_TEXT) - both ultimately rasterize into a <canvas>,
+// but CanvasFont uploads that canvas straight to WebGL as the texture
+// source, which triggers Chromium's GPU-to-GPU "shared image"/mailbox fast
+// path on some Android GPU configurations (Quest's browser included) -
+// this can fail outright (GL_INVALID_OPERATION "texture is not a shared
+// image" / "invalid mailbox name") and leave the texture blank: the menu
+// item is still there and still clickable (hit-testing is geometry, not
+// pixels), just invisible. Uploading pixel data (via getImageData) instead
+// of the canvas itself sidesteps that path entirely - same fix as the
+// comfort vignette's texture above.
+function createVrMenuLabelTexture(text) {
+  const scale = 2; // supersampled for crisper text at typical VR viewing distance
+  const width = VR_MENU_ITEM_WIDTH * scale;
+  const height = VR_MENU_ITEM_HEIGHT * scale;
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `${48 * scale}px Arial`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, width / 2, height / 2);
+
+  const imageData = ctx.getImageData(0, 0, width, height);
+  return new Texture(app.graphicsDevice, {
+    name: `VrMenuLabel-${text}`,
+    width,
+    height,
+    format: PIXELFORMAT_RGBA8,
+    mipmaps: false,
+    minFilter: FILTER_LINEAR,
+    magFilter: FILTER_LINEAR,
+    addressU: ADDRESS_CLAMP_TO_EDGE,
+    addressV: ADDRESS_CLAMP_TO_EDGE,
+    levels: [imageData.data]
+  });
+}
 
 const vrMenuScreen = new Entity("VrMenuScreen");
 vrMenuScreen.addComponent("screen", { screenSpace: false, referenceResolution: new Vec2(400, 400) });
@@ -2552,18 +2585,13 @@ const VR_MENU_DEFAULT_COLOR = new Color(1, 1, 1);
 const vrMenuItems = years.map((year, i) => {
   const item = new Entity(`VrMenuItem_${year}`);
   item.addComponent("element", {
-    type: ELEMENTTYPE_TEXT,
-    text: year,
-    font: vrMenuFont,
-    fontSize: 48,
+    type: ELEMENTTYPE_IMAGE,
+    texture: createVrMenuLabelTexture(year),
     color: VR_MENU_DEFAULT_COLOR,
     width: VR_MENU_ITEM_WIDTH,
     height: VR_MENU_ITEM_HEIGHT,
-    autoWidth: false,
-    autoHeight: false,
     pivot: [0.5, 0.5],
     anchor: [0.5, 0.5, 0.5, 0.5],
-    alignment: [0.5, 0.5],
     useInput: true
   });
   const offsetFromCenter = (years.length - 1) / 2 - i;
