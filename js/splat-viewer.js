@@ -31,6 +31,7 @@ import {
   RESOLUTION_AUTO,
   Vec2,
   Vec3,
+  Quat,
   Pose,
   OrbitController,
   InputFrame,
@@ -269,6 +270,14 @@ camera.addComponent("camera", {
 });
 cameraRig.addChild(camera);
 
+// Parent for all actual reef content (the splat itself, the click marker) -
+// kept separate from app.root so the VR world-flip feature (see "VR world
+// tilt" section below) can rotate the reef around a pivot without touching
+// the camera rig or any camera-attached HUD (VR menu, comfort vignette),
+// which stay children of camera/app.root directly and are unaffected.
+const worldRoot = new Entity("WorldRoot");
+app.root.addChild(worldRoot);
+
 // Click-to-center marker: a flat glowing ring dropped at wherever the last
 // click/tap actually landed on the reef (see clickToCenter below). Emissive-
 // only material since this scene has no light components registered - an
@@ -300,7 +309,7 @@ clickMarker.addComponent("render", {
   castShadows: false,
   receiveShadows: false
 });
-app.root.addChild(clickMarker);
+worldRoot.addChild(clickMarker);
 clickMarker.enabled = false;
 let clickMarkerHideTimer = null;
 
@@ -1298,67 +1307,79 @@ app.on("update", dt => {
     if (t >= 1) recenterAnim = null;
   }
 
-  desiredMove.set(0, 0, 0);
+  updateWorldFlip();
 
-  const strafe =
-    Number(pressedKeys.has("KeyD") || pressedKeys.has("ArrowRight")) -
-    Number(pressedKeys.has("KeyA") || pressedKeys.has("ArrowLeft"));
-  const advance =
-    Number(pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp")) -
-    Number(pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown"));
-  // Straight world-Y lift, complementing WASD's flat glide - E surfaces,
-  // Q dives, so between the two the camera can reach anywhere in full 3D.
-  // Meaningless in 2D mode (camera height has no effect under orthographic
-  // projection, and pitch is locked straight down anyway), so it's a no-op
-  // there rather than silently moving the camera somewhere the view can't
-  // show.
-  const lift = is2DMode ? 0 : Number(pressedKeys.has("KeyE")) - Number(pressedKeys.has("KeyQ"));
+  // Movement is frozen for the (brief) duration of the world-flip
+  // transition - see "VR world tilt" above. Everything here is skipped
+  // outright rather than merely not-applied, so flyVelocity/desiredMove
+  // stay exactly where they were and pick back up unchanged once the flip
+  // finishes, instead of decaying to zero mid-freeze.
+  if (!worldFlipAnimating) {
+    desiredMove.set(0, 0, 0);
 
-  if (strafe !== 0 || advance !== 0 || lift !== 0) {
-    updateFlatBasis();
+    const strafe =
+      Number(pressedKeys.has("KeyD") || pressedKeys.has("ArrowRight")) -
+      Number(pressedKeys.has("KeyA") || pressedKeys.has("ArrowLeft"));
+    const advance =
+      Number(pressedKeys.has("KeyW") || pressedKeys.has("ArrowUp")) -
+      Number(pressedKeys.has("KeyS") || pressedKeys.has("ArrowDown"));
+    // Straight world-Y lift, complementing WASD's flat glide - E surfaces,
+    // Q dives, so between the two the camera can reach anywhere in full 3D.
+    // Meaningless in 2D mode (camera height has no effect under orthographic
+    // projection, and pitch is locked straight down anyway), so it's a no-op
+    // there rather than silently moving the camera somewhere the view can't
+    // show.
+    const lift = is2DMode ? 0 : Number(pressedKeys.has("KeyE")) - Number(pressedKeys.has("KeyQ"));
 
-    desiredMove.addScaled(right, strafe).addScaled(flatForward, advance);
-    desiredMove.y += lift;
+    if (strafe !== 0 || advance !== 0 || lift !== 0) {
+      updateFlatBasis();
 
-    if (desiredMove.lengthSq() > 0) {
-      const speedMultiplier =
-        pressedKeys.has("ShiftLeft") || pressedKeys.has("ShiftRight")
-          ? 4
-          : pressedKeys.has("ControlLeft") || pressedKeys.has("ControlRight")
-            ? 0.25
-            : 1;
+      desiredMove.addScaled(right, strafe).addScaled(flatForward, advance);
+      desiredMove.y += lift;
 
-      // In 2D mode, scale glide speed by orthoHeight the same way pan
-      // already does - otherwise a fixed world-space speed would crawl when
-      // zoomed in tight and blow past the reef when zoomed out.
-      desiredMove.normalize().mulScalar(MOVE_SPEED * speedMultiplier * (is2DMode ? orthoHeight : 1));
+      if (desiredMove.lengthSq() > 0) {
+        const speedMultiplier =
+          pressedKeys.has("ShiftLeft") || pressedKeys.has("ShiftRight")
+            ? 4
+            : pressedKeys.has("ControlLeft") || pressedKeys.has("ControlRight")
+              ? 0.25
+              : 1;
+
+        // In 2D mode, scale glide speed by orthoHeight the same way pan
+        // already does - otherwise a fixed world-space speed would crawl when
+        // zoomed in tight and blow past the reef when zoomed out.
+        desiredMove.normalize().mulScalar(MOVE_SPEED * speedMultiplier * (is2DMode ? orthoHeight : 1));
+      }
     }
-  }
 
-  const damping =
-    desiredMove.lengthSq() > flyVelocity.lengthSq() ? FLY_MOVE_ACCELERATION_DAMPING : FLY_MOVE_DECELERATION_DAMPING;
-  flyVelocity.lerp(flyVelocity, desiredMove, damp(damping, dt));
+    const damping =
+      desiredMove.lengthSq() > flyVelocity.lengthSq() ? FLY_MOVE_ACCELERATION_DAMPING : FLY_MOVE_DECELERATION_DAMPING;
+    flyVelocity.lerp(flyVelocity, desiredMove, damp(damping, dt));
 
-  if (desiredMove.lengthSq() === 0 && flyVelocity.lengthSq() < 1e-4) {
-    flyVelocity.set(0, 0, 0);
-  }
+    if (desiredMove.lengthSq() === 0 && flyVelocity.lengthSq() < 1e-4) {
+      flyVelocity.set(0, 0, 0);
+    }
 
-  if (flyVelocity.lengthSq() > 0) {
-    move.copy(flyVelocity).mulScalar(dt);
-    translateCamera(move, { moveZoomTarget: true, trackHeightChange: true });
+    if (flyVelocity.lengthSq() > 0) {
+      move.copy(flyVelocity).mulScalar(dt);
+      translateCamera(move, { moveZoomTarget: true, trackHeightChange: true });
+    }
   }
 
   if (app.xr && app.xr.active) {
     // Flight is suspended while the menu is open - the left stick is
     // repurposed for menu navigation instead (see updateVrMenuNavigationInput),
     // and flying around while browsing a menu would just be disorienting.
+    // Also suspended (but the toggle input itself kept live, so a press
+    // isn't lost) during the world-flip transition, per the freeze above.
     if (vrMenuScreen.enabled) {
       updateVrMenuNavigationInput();
       vrVignetteTargetIntensity = 0; // updateVrLocomotion isn't running to do this itself
-    } else {
+    } else if (!worldFlipAnimating) {
       updateVrLocomotion(dt);
     }
     updateVrMenuToggleInput();
+    updateVrWorldFlipToggleInput();
   }
   updateVrVignette(dt);
 
@@ -1680,6 +1701,114 @@ function updateVrLocomotion(dt) {
 }
 
 // --------------------------------------------------
+// VR world tilt ("prop the reef up like a wall")
+//
+// Google Earth VR's trick for viewing content that mostly extends
+// downward: instead of tipping your neck to look at the ground, tip the
+// *content* 90 degrees around whatever point you're currently looking at,
+// so what was directly below now sits in front of you at eye level - like
+// the reef got propped up against a wall. Rotating worldRoot (which holds
+// the splat and click marker - see its declaration) rather than the camera
+// means every existing control keeps working exactly as before: pose.
+// position/angles, orbit, pan, WASD/stick movement, and zoom are all
+// defined in the same absolute world space throughout, completely
+// unaffected by whatever worldRoot's transform happens to be. Only the
+// reef content itself visibly moves.
+//
+// A second press always animates straight back to the untilted identity
+// transform rather than deriving a fresh "undo" rotation - simpler, and
+// guaranteed to land exactly back at the original orientation with no
+// drift, regardless of where the camera looked while flipped.
+// --------------------------------------------------
+
+const WORLD_FLIP_DURATION_SECONDS = 0.5;
+
+let worldFlipped = false;
+let worldFlipAnimating = false;
+let worldFlipStartTime = 0;
+const worldFlipFromRot = new Quat();
+const worldFlipToRot = new Quat();
+const worldFlipFromPos = new Vec3();
+const worldFlipToPos = new Vec3();
+const worldFlipCurrentRot = new Quat();
+const worldFlipCurrentPos = new Vec3();
+const worldDown = new Vec3(0, -1, 0);
+const worldFlipAxis = new Vec3();
+const worldFlipPivot = new Vec3();
+const worldFlipRotatedPivot = new Vec3();
+
+function toggleWorldFlip() {
+  // Mid-flip presses are ignored rather than queued/reversed - same reason
+  // updateVrMenuToggleInput's press is edge-detected, just at the gesture
+  // level instead of the button level. 2D mode has its own fixed top-down
+  // convention (enter2DMode locks pitch to a single value) that a 3D tilt
+  // would fight, same reasoning as orbitAroundPickedPoint being 3D-only.
+  if (worldFlipAnimating || is2DMode) return;
+
+  worldFlipFromRot.copy(worldRoot.getLocalRotation());
+  worldFlipFromPos.copy(worldRoot.getLocalPosition());
+
+  if (worldFlipped) {
+    worldFlipToRot.setFromEulerAngles(0, 0, 0);
+    worldFlipToPos.set(0, 0, 0);
+  } else {
+    // Horizontal-only forward (like vrFlatForward above) - camera.forward
+    // reflects the headset's real current look direction, not just yaw,
+    // since VR pitch/roll come from tracking rather than pose.angles.
+    vrFlatForward.copy(camera.forward);
+    vrFlatForward.y = 0;
+    if (vrFlatForward.lengthSq() < 1e-8) vrFlatForward.set(0, 0, -1);
+    vrFlatForward.normalize();
+
+    // The axis such that rotating "down" by +90 degrees about it lands
+    // exactly on the current horizontal forward direction - the standard
+    // identity for perpendicular unit vectors: rotating A by 90 degrees
+    // about normalize(A x B) lands on B.
+    worldFlipAxis.cross(worldDown, vrFlatForward).normalize();
+    worldFlipToRot.setFromAxisAngle(worldFlipAxis, 90);
+
+    // Keep whatever point is currently dead-center on screen visually
+    // fixed through the flip, so the reef tips around your focus rather
+    // than swinging the whole scene away from what you were looking at.
+    pose.getFocus(worldFlipPivot);
+    worldFlipToRot.transformVector(worldFlipPivot, worldFlipRotatedPivot);
+    worldFlipToPos.copy(worldFlipPivot).sub(worldFlipRotatedPivot);
+  }
+
+  worldFlipAnimating = true;
+  worldFlipStartTime = performance.now();
+  worldFlipped = !worldFlipped;
+}
+
+function updateWorldFlip() {
+  if (!worldFlipAnimating) return;
+
+  const t = Math.min(1, (performance.now() - worldFlipStartTime) / 1000 / WORLD_FLIP_DURATION_SECONDS);
+  const eased = t * t * (3 - 2 * t); // smoothstep
+
+  worldFlipCurrentRot.slerp(worldFlipFromRot, worldFlipToRot, eased);
+  worldFlipCurrentPos.lerp(worldFlipFromPos, worldFlipToPos, eased);
+  worldRoot.setLocalRotation(worldFlipCurrentRot);
+  worldRoot.setLocalPosition(worldFlipCurrentPos);
+
+  if (t >= 1) worldFlipAnimating = false;
+}
+
+let vrWorldFlipButtonWasPressed = false;
+function updateVrWorldFlipToggleInput() {
+  const gamepad = vrRightInput && vrRightInput.gamepad;
+  const buttons = gamepad && gamepad.buttons;
+  // Button 4 is the right controller's A button under the xr-standard
+  // gamepad mapping (see updateVrMenuToggleInput for the left-hand X
+  // button equivalent) - edge-detected so a held button only toggles once.
+  const pressed = !!(buttons && buttons[4] && buttons[4].pressed);
+  if (pressed && !vrWorldFlipButtonWasPressed) {
+    toggleWorldFlip();
+  }
+  vrWorldFlipButtonWasPressed = pressed;
+}
+
+// --------------------------------------------------
 // VR comfort vignette
 //
 // Strongly darkens the periphery of the view while the stick is actively
@@ -1722,8 +1851,8 @@ function updateVrLocomotion(dt) {
 //    any real FOV edge) is what actually produces "solid black at the
 //    edges, narrow FOV in the middle" rather than a faint all-over tint.
 const VR_VIGNETTE_DISTANCE = 0.08;
-const VR_VIGNETTE_INNER_ANGLE_DEG = 15; // fully transparent within this angle of view center
-const VR_VIGNETTE_OUTER_ANGLE_DEG = 28; // fully opaque black from this angle outward
+const VR_VIGNETTE_INNER_ANGLE_DEG = 10; // fully transparent within this angle of view center
+const VR_VIGNETTE_OUTER_ANGLE_DEG = 20; // fully opaque black from this angle outward
 const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85; // physical extent of the quad itself
 const VR_VIGNETTE_HALF_SIZE = VR_VIGNETTE_DISTANCE * Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
 const VR_VIGNETTE_INNER_FRACTION =
@@ -1820,12 +1949,61 @@ function setupVrVignette() {
 }
 setupVrVignette();
 
+// A world-space quad built isotropic (equal width/height, see setupVrVignette)
+// renders as a genuine on-screen circle for a normal desktop camera - fovAxis
+// 'vertical' derives the horizontal FOV from the aspect ratio specifically so
+// that identity holds. But WebXR hands each eye's *own* projection matrix
+// straight from the device, bypassing camera.fov/aspectRatio entirely, and
+// there's no guarantee that matrix's real angular width-to-height ratio
+// matches the eye's render-target pixel aspect ratio (headsets commonly
+// aren't perfectly matched here) - when it doesn't, the same isotropic quad
+// renders as a visible ellipse instead of a circle, which is what showed up
+// on hardware even though the desktop test looked correct.
+//
+// Rather than guess a fudge factor, decode the actual per-eye frustum
+// directly from its projection matrix. tanLeft/Right/Top/Bottom below are
+// the standard decomposition of an asymmetric OpenXR/WebXR projection
+// matrix back into view-space tangent angles (same formulas as Khronos's
+// own xr_linear.h reference, and confirmed here against PlayCanvas's own
+// Mat4.setFrustum, which is what ultimately produces this matrix: r[0] =
+// 2n/(right-left), r[8] = (right+left)/(right-left), so tanRight = (r[8]+1)/
+// r[0] and tanLeft = (r[8]-1)/r[0], symmetrically for top/bottom via r[5]/
+// r[9]). Comparing the resulting real angular aspect ratio against the
+// view's actual pixel aspect ratio (view.viewport) gives the exact
+// correction needed - scaling the quad's local X (world-space width, since
+// rotating 90 degrees about local X never touches local X) so it projects
+// back to a true circle, whatever this specific headset's real optics are.
+function updateVrVignetteAspect() {
+  if (!vrVignetteEntity) return;
+
+  const view = app.xr && app.xr.active && app.xr.views && app.xr.views.list[0];
+  if (!view) {
+    vrVignetteEntity.setLocalScale(1, 1, 1);
+    return;
+  }
+
+  const m = view.projMat.data;
+  const tanLeft = (m[8] - 1) / m[0];
+  const tanRight = (m[8] + 1) / m[0];
+  const tanBottom = (m[9] - 1) / m[5];
+  const tanTop = (m[9] + 1) / m[5];
+
+  const frustumAspect = (tanRight - tanLeft) / (tanTop - tanBottom);
+  const viewportAspect = view.viewport.z / view.viewport.w;
+  const correction = frustumAspect / viewportAspect;
+
+  if (Number.isFinite(correction) && correction > 0) {
+    vrVignetteEntity.setLocalScale(correction, 1, 1);
+  }
+}
+
 // Runs every frame regardless of XR/menu state (unlike updateVrLocomotion,
 // which only sets the *target* intensity, and only while actively flying)
 // so the fade-out still completes smoothly after the stick centers, the
 // menu opens, or the VR session ends.
 function updateVrVignette(dt) {
   if (!vrVignetteMaterial) return;
+  updateVrVignetteAspect();
   vrVignetteIntensity += (vrVignetteTargetIntensity - vrVignetteIntensity) * Math.min(1, dt / VR_VIGNETTE_FADE_SECONDS);
   vrVignetteMaterial.opacity = vrVignetteIntensity;
   vrVignetteMaterial.update();
@@ -2244,7 +2422,7 @@ function loadTimepoint(url) {
     // app.scene.gsplat.material, which is what the fog shader override below
     // hooks into - it only has to be set up once, not reapplied per entity.
     splat.addComponent("gsplat", { asset, unified: true });
-    app.root.addChild(splat);
+    worldRoot.addChild(splat);
 
     const previousEntity = currentSplatEntity;
     const previousAsset = currentSplatAsset;
@@ -2497,6 +2675,14 @@ if (app.xr) {
     vrMenuButtonWasPressed = false;
     vrMenuStickArmed = true;
     vrMenuStickClickWasPressed = false;
+    vrWorldFlipButtonWasPressed = false;
+
+    // Snap (not animate) back to untilted - a VR-only tilt shouldn't carry
+    // over into the desktop view after taking the headset off.
+    worldFlipped = false;
+    worldFlipAnimating = false;
+    worldRoot.setLocalRotation(0, 0, 0, 1);
+    worldRoot.setLocalPosition(0, 0, 0);
   });
 }
 
@@ -2535,6 +2721,15 @@ window.__debug = {
     getSelectedIndex: () => vrMenuSelectedIndex,
     moveSelection: delta => moveVrMenuSelection(delta),
     confirmSelection: () => selectVrTimepoint(vrMenuItems[vrMenuSelectedIndex].year)
+  },
+  worldFlip: {
+    toggle: () => toggleWorldFlip(),
+    isFlipped: () => worldFlipped,
+    isAnimating: () => worldFlipAnimating,
+    getTransform: () => ({
+      rotation: worldRoot.getLocalRotation().clone(),
+      position: worldRoot.getLocalPosition().clone()
+    })
   },
   vrVignette: {
     // Forces the intensity directly (bypassing the fade and the "only
