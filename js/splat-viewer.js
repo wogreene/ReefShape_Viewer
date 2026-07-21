@@ -1883,49 +1883,21 @@ function updateVrWorldFlipToggleInput() {
 // --------------------------------------------------
 
 // Sized in terms of half-angle from the view direction rather than a flat
-// world-space size. Two separate problems, two separate fixes:
+// world-space size, so the fully-opaque ring sits at a known angle off
+// center and the quad's own extent reaches well past any real headset's
+// FOV (a square quad's diagonal reach exceeds its edge reach, mirroring
+// how a headset's diagonal FOV exceeds its horizontal/vertical FOV).
 //
-// 1) The quad's own physical extent (VR_VIGNETTE_COVERAGE_ANGLE_DEG) is
-//    deliberately much wider than any real headset's per-eye FOV:
-//    PlayCanvas's XR rendering drives each eye from the device's own
-//    (asymmetric, per-eye) projection matrix rather than the camera
-//    component's .fov property, so there's no simple queryable "actual
-//    FOV" number to size against here - instead the quad is made wide
-//    enough (~85 degrees off-center) to guarantee it reaches past the
-//    true edge of view in every direction, corners included (a square
-//    quad's diagonal reach is naturally wider than its edge reach, which
-//    conveniently mirrors how a headset's diagonal FOV exceeds its
-//    horizontal/vertical FOV). A prior version sized the quad by a flat
-//    world-space half-size with no angle check, which left a real gap
-//    between the quad's edge and the actual edge of view - the periphery
-//    out there stayed completely unmasked rather than merely
-//    under-darkened.
-// 2) Separately, the ring itself needs to reach full opacity well inside
-//    that coverage, not right at the edge of the visible frame - an
-//    earlier version put the fully-opaque ring at the same angle as a
-//    typical display's own edge, so in practice the visible frame was
-//    always mid-fade and never read as genuinely black. Pulling both ring
-//    angles in close to center (moderate clear cone, opaque well before
-//    any real FOV edge) is what actually produces "solid black at the
-//    edges, narrow FOV in the middle" rather than a faint all-over tint.
-// 3) VR_VIGNETTE_DISTANCE itself needs to be large, not small - a quad
-//    placed close to the camera (as an early version did, ~0.08m) sits
-//    close enough that each eye's own ~63mm IPD offset from the shared
-//    head/camera transform meaningfully changes the *angle* each eye sees
-//    it at (this is a single object parented to the shared camera, not a
-//    genuinely separate per-eye render - PlayCanvas's screen-space UI,
-//    the alternative that would sidestep this, isn't reliably XR-aware
-//    either, see the note above on why this is world-space to begin
-//    with). At close range that per-eye angular difference is large
-//    enough to read as a disorienting cross-eyed convergence rather than
-//    a shared, centered mask. Parallax angle is approximately atan((IPD/2)
-//    / distance), so pushing distance out instead shrinks it toward
-//    negligible - 40m gives under 0.05 degrees, imperceptible for a soft
-//    vignette gradient - while staying safely inside the camera's far
-//    clip, which updateZoomRange guarantees is always at least 120
-//    (maxZoomDistance floors at 60, farClip is double that) regardless of
-//    any given reef's actual scale.
+// VR_VIGNETTE_WIDEN is the one empirical fudge factor here: measured on
+// hardware as reading taller than wide (an isotropic quad doesn't
+// necessarily project as a circle - PlayCanvas's XR rendering hands each
+// eye its own projection matrix straight from the device, bypassing
+// camera.fov/aspectRatio's usual aspect-consistent derivation entirely),
+// so the quad is simply built wider than tall from the start to
+// compensate, rather than computed from the device's actual per-eye
+// optics - simple and tunable if it still reads wrong.
 const VR_VIGNETTE_DISTANCE = 40;
+const VR_VIGNETTE_WIDEN = 1.5; // width multiplier - tune this if it still reads non-circular
 const VR_VIGNETTE_INNER_ANGLE_DEG = 10; // fully transparent within this angle of view center
 const VR_VIGNETTE_OUTER_ANGLE_DEG = 20; // fully opaque black from this angle outward
 const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85; // physical extent of the quad itself
@@ -1992,7 +1964,9 @@ function setupVrVignette() {
     vrVignetteMaterial.opacity = 0;
     vrVignetteMaterial.update();
 
-    const geometry = new PlaneGeometry({ halfExtents: new Vec2(VR_VIGNETTE_HALF_SIZE, VR_VIGNETTE_HALF_SIZE) });
+    const geometry = new PlaneGeometry({
+      halfExtents: new Vec2(VR_VIGNETTE_HALF_SIZE * VR_VIGNETTE_WIDEN, VR_VIGNETTE_HALF_SIZE)
+    });
     const mesh = Mesh.fromGeometry(app.graphicsDevice, geometry);
     const meshInstance = new MeshInstance(mesh, vrVignetteMaterial);
 
@@ -2024,61 +1998,12 @@ function setupVrVignette() {
 }
 setupVrVignette();
 
-// A world-space quad built isotropic (equal width/height, see setupVrVignette)
-// renders as a genuine on-screen circle for a normal desktop camera - fovAxis
-// 'vertical' derives the horizontal FOV from the aspect ratio specifically so
-// that identity holds. But WebXR hands each eye's *own* projection matrix
-// straight from the device, bypassing camera.fov/aspectRatio entirely, and
-// there's no guarantee that matrix's real angular width-to-height ratio
-// matches the eye's render-target pixel aspect ratio (headsets commonly
-// aren't perfectly matched here) - when it doesn't, the same isotropic quad
-// renders as a visible ellipse instead of a circle, which is what showed up
-// on hardware even though the desktop test looked correct.
-//
-// Rather than guess a fudge factor, decode the actual per-eye frustum
-// directly from its projection matrix. tanLeft/Right/Top/Bottom below are
-// the standard decomposition of an asymmetric OpenXR/WebXR projection
-// matrix back into view-space tangent angles (same formulas as Khronos's
-// own xr_linear.h reference, and confirmed here against PlayCanvas's own
-// Mat4.setFrustum, which is what ultimately produces this matrix: r[0] =
-// 2n/(right-left), r[8] = (right+left)/(right-left), so tanRight = (r[8]+1)/
-// r[0] and tanLeft = (r[8]-1)/r[0], symmetrically for top/bottom via r[5]/
-// r[9]). Comparing the resulting real angular aspect ratio against the
-// view's actual pixel aspect ratio (view.viewport) gives the exact
-// correction needed - scaling the quad's local X (world-space width, since
-// rotating 90 degrees about local X never touches local X) so it projects
-// back to a true circle, whatever this specific headset's real optics are.
-function updateVrVignetteAspect() {
-  if (!vrVignetteEntity) return;
-
-  const view = app.xr && app.xr.active && app.xr.views && app.xr.views.list[0];
-  if (!view) {
-    vrVignetteEntity.setLocalScale(1, 1, 1);
-    return;
-  }
-
-  const m = view.projMat.data;
-  const tanLeft = (m[8] - 1) / m[0];
-  const tanRight = (m[8] + 1) / m[0];
-  const tanBottom = (m[9] - 1) / m[5];
-  const tanTop = (m[9] + 1) / m[5];
-
-  const frustumAspect = (tanRight - tanLeft) / (tanTop - tanBottom);
-  const viewportAspect = view.viewport.z / view.viewport.w;
-  const correction = frustumAspect / viewportAspect;
-
-  if (Number.isFinite(correction) && correction > 0) {
-    vrVignetteEntity.setLocalScale(correction, 1, 1);
-  }
-}
-
 // Runs every frame regardless of XR/menu state (unlike updateVrLocomotion,
 // which only sets the *target* intensity, and only while actively flying)
 // so the fade-out still completes smoothly after the stick centers, the
 // menu opens, or the VR session ends.
 function updateVrVignette(dt) {
   if (!vrVignetteMaterial) return;
-  updateVrVignetteAspect();
   vrVignetteIntensity += (vrVignetteTargetIntensity - vrVignetteIntensity) * Math.min(1, dt / VR_VIGNETTE_FADE_SECONDS);
   vrVignetteMaterial.opacity = vrVignetteIntensity;
   vrVignetteMaterial.update();
