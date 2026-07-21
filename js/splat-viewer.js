@@ -1086,45 +1086,6 @@ async function clickToCenter(screenX, screenY) {
   recenterOn(await picker.getWorldPointAsync(x, y));
 }
 
-// Shift+left-drag orbits around whatever's under the cursor at drag-start,
-// the way Google Earth's desktop viewer works - handy on laptops where
-// right-click-drag or two-finger-drag orbit gestures are unreliable.
-// Reuses the exact same orbit-around-focus mechanism a normal right-drag
-// already uses (appendOrbitRotate/orbitController, which pivot around
-// pose.getFocus() - always whatever's dead-center on screen) rather than
-// building separate arbitrary-point orbit math: silently reorients (no
-// position change, so no visible fly-to) to look exactly at the picked
-// point first - which makes it the focus, dead-center, without moving the
-// camera - then an ordinary orbit-drag pivots around it for the rest of
-// the gesture. 3D mode only (2D locks pitch to a single top-down value via
-// enter2DMode's pitchRange, which this would fight).
-async function orbitAroundPickedPoint(screenX, screenY) {
-  if (!camera.camera || is2DMode) return;
-
-  const rect = canvas.getBoundingClientRect();
-  const x = screenX - rect.left;
-  const y = screenY - rect.top;
-
-  picker.resize(rect.width, rect.height);
-  picker.prepare(camera.camera, app.scene, [app.scene.layers.getLayerByName("World")]);
-  const hitPoint = await picker.getWorldPointAsync(x, y);
-  if (!hitPoint) return; // missed all geometry - leave dragMode alone (no orbit, no pan)
-
-  recenterAnim = null; // any manual input takes over from an in-progress slide
-
-  pose.look(pose.position, hitPoint);
-  // Authored/derived look-at poses can end up more oblique than our tilt
-  // floor (see applyCameraPose) - clamp on the way in, same as there.
-  pose.angles.x = Math.max(-MAX_PITCH, Math.min(-MIN_PITCH, pose.angles.x));
-  orbitController.attach(pose, false);
-  syncCameraRig();
-
-  viewDistance = Math.max(0.001, Math.min(maxZoomDistance, pose.position.distance(hitPoint)));
-  zoomTarget.copy(hitPoint);
-
-  dragMode = "orbit";
-}
-
 function touchCenterAndDist(activePointers) {
   const [a, b] = Array.from(activePointers.values());
   return {
@@ -1185,19 +1146,14 @@ canvas.addEventListener("pointerdown", event => {
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
 
-    if (event.button === 0 && event.shiftKey) {
-      // See orbitAroundPickedPoint - dragMode is set (if at all) once its
-      // async pick resolves, not here.
-      dragMode = null;
-      clickCandidateActive = false;
-      orbitAroundPickedPoint(event.clientX, event.clientY);
-    } else {
-      // Mouse (or pen): left button pans, right button orbits.
-      dragMode = event.button === 2 ? "orbit" : "pan";
-      clickCandidateActive = event.button !== 2;
-      clickCandidateX = event.clientX;
-      clickCandidateY = event.clientY;
-    }
+    // Mouse (or pen): left button pans, right button orbits. Shift+left
+    // orbits too (mirrors right-click-drag exactly, pivoting around
+    // pose.getFocus() same as always) - a laptop-friendly alternative on
+    // trackpads where right-click-drag or two-finger-drag is unreliable.
+    dragMode = event.button === 2 || (event.button === 0 && event.shiftKey) ? "orbit" : "pan";
+    clickCandidateActive = event.button === 0 && !event.shiftKey;
+    clickCandidateX = event.clientX;
+    clickCandidateY = event.clientY;
   }
 });
 
@@ -1739,20 +1695,41 @@ function updateVrLocomotion(dt) {
 // take for granted for 2D/screen-space UI in an XR session.
 // --------------------------------------------------
 
-// Sized in terms of half-angle from the view direction, not just "big
-// enough" - the fully-opaque ring starts at ~38 degrees off-center and the
-// fully-clear zone ends at ~20 degrees, chosen to sit comfortably inside a
-// typical headset's half-FOV (~45-55 degrees) while still clearly reaching
-// full black well before the edge of view. An earlier version sized this
-// relative to the *quad's own* radius without checking the resulting
-// angle, which (at this distance/half-size) put the fully-opaque ring
-// beyond even desktop's 75-degree FOV - invisible, since the entire
-// viewport fell inside the "still transparent" zone. Tunable if it reads
-// as too strong/weak or too tight/loose once tried in an actual headset.
+// Sized in terms of half-angle from the view direction rather than a flat
+// world-space size. Two separate problems, two separate fixes:
+//
+// 1) The quad's own physical extent (VR_VIGNETTE_COVERAGE_ANGLE_DEG) is
+//    deliberately much wider than any real headset's per-eye FOV:
+//    PlayCanvas's XR rendering drives each eye from the device's own
+//    (asymmetric, per-eye) projection matrix rather than the camera
+//    component's .fov property, so there's no simple queryable "actual
+//    FOV" number to size against here - instead the quad is made wide
+//    enough (~85 degrees off-center) to guarantee it reaches past the
+//    true edge of view in every direction, corners included (a square
+//    quad's diagonal reach is naturally wider than its edge reach, which
+//    conveniently mirrors how a headset's diagonal FOV exceeds its
+//    horizontal/vertical FOV). A prior version sized the quad by a flat
+//    world-space half-size with no angle check, which left a real gap
+//    between the quad's edge and the actual edge of view - the periphery
+//    out there stayed completely unmasked rather than merely
+//    under-darkened.
+// 2) Separately, the ring itself needs to reach full opacity well inside
+//    that coverage, not right at the edge of the visible frame - an
+//    earlier version put the fully-opaque ring at the same angle as a
+//    typical display's own edge, so in practice the visible frame was
+//    always mid-fade and never read as genuinely black. Pulling both ring
+//    angles in close to center (moderate clear cone, opaque well before
+//    any real FOV edge) is what actually produces "solid black at the
+//    edges, narrow FOV in the middle" rather than a faint all-over tint.
 const VR_VIGNETTE_DISTANCE = 0.08;
-const VR_VIGNETTE_HALF_SIZE = 0.09;
-const VR_VIGNETTE_INNER_FRACTION = 0.32; // ~20 degrees off-center at the distance/half-size above
-const VR_VIGNETTE_OUTER_FRACTION = 0.7; // ~38 degrees off-center
+const VR_VIGNETTE_INNER_ANGLE_DEG = 15; // fully transparent within this angle of view center
+const VR_VIGNETTE_OUTER_ANGLE_DEG = 28; // fully opaque black from this angle outward
+const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85; // physical extent of the quad itself
+const VR_VIGNETTE_HALF_SIZE = VR_VIGNETTE_DISTANCE * Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
+const VR_VIGNETTE_INNER_FRACTION =
+  Math.tan((VR_VIGNETTE_INNER_ANGLE_DEG * Math.PI) / 180) / Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
+const VR_VIGNETTE_OUTER_FRACTION =
+  Math.tan((VR_VIGNETTE_OUTER_ANGLE_DEG * Math.PI) / 180) / Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
 const VR_VIGNETTE_FADE_SECONDS = 0.25;
 
 let vrVignetteMaterial = null;
