@@ -1693,28 +1693,38 @@ function updateVrLocomotion(dt) {
 
   // "Straight up" from the reef's own perspective - world Y normally, but
   // wherever that direction ended up after a world-flip (see "VR world
-  // tilt" above) once tilted. For a flat/horizontal reef, world Y happens
-  // to serve three roles at once: the axis you flatten forward/right
-  // against for level glide movement, the vertical-lift axis, and the
-  // turn/yaw axis - this generalizes all three to whatever the reef's
-  // rotated normal currently is, so glide/lift/turn all keep meaning the
-  // same thing relative to the reef regardless of its orientation. Without
-  // this, flattening against a stale world-Y let the tilted reef's own
-  // normal leak into "forward," which read as an unwanted zoom instead of
-  // a level glide.
+  // tilt" above) once tilted. Used below for the vertical-lift axis and
+  // the turn/yaw axis - both keep meaning the same thing relative to the
+  // reef regardless of its orientation.
   worldRoot.getLocalRotation().transformVector(worldUpConst, vrUpAxis);
 
   if (left) {
-    vrFlatForward.copy(camera.forward);
-    vrFlatForward.addScaled(vrUpAxis, -vrFlatForward.dot(vrUpAxis));
-    if (vrFlatForward.lengthSq() > 1e-8) vrFlatForward.normalize();
+    if (worldFlipped) {
+      // Wall mode uses fixed, absolute directions instead of view-derived
+      // ones. Deriving "forward" from camera.forward/right (as the non-
+      // flipped branch below does) was still tied to exactly where you're
+      // looking - unreliable, since even a small pitch change was enough
+      // to swing which way read as "forward." A picture on a wall doesn't
+      // work that way: stick-up always pans up the wall and stick-down
+      // always down, and left/right always strafes along whatever was
+      // your view's right at the moment you flipped (worldFlipAxis - see
+      // toggleWorldFlip). Both stay fixed regardless of gaze direction and
+      // regardless of how much the wall has since been spun with the
+      // right stick - spinning rotates worldRoot about vrUpAxis, a
+      // different axis from either of these, so neither reference drifts.
+      vrMove.addScaled(worldFlipAxis, left.x).addScaled(worldUpConst, -left.y);
+    } else {
+      vrFlatForward.copy(camera.forward);
+      vrFlatForward.y = 0;
+      if (vrFlatForward.lengthSq() > 1e-8) vrFlatForward.normalize();
 
-    vrFlatRight.copy(camera.right);
-    vrFlatRight.addScaled(vrUpAxis, -vrFlatRight.dot(vrUpAxis));
-    if (vrFlatRight.lengthSq() > 1e-8) vrFlatRight.normalize();
+      vrFlatRight.copy(camera.right);
+      vrFlatRight.y = 0;
+      if (vrFlatRight.lengthSq() > 1e-8) vrFlatRight.normalize();
 
-    // Stick Y is negative when pushed forward (away from the thumb).
-    vrMove.addScaled(vrFlatRight, left.x).addScaled(vrFlatForward, -left.y);
+      // Stick Y is negative when pushed forward (away from the thumb).
+      vrMove.addScaled(vrFlatRight, left.x).addScaled(vrFlatForward, -left.y);
+    }
   }
 
   if (right) {
