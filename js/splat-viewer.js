@@ -45,9 +45,17 @@ import {
   StandardMaterial,
   Picker,
   TorusGeometry,
+  PlaneGeometry,
   Mesh,
   MeshInstance,
   BLEND_ADDITIVE,
+  BLEND_NORMAL,
+  CULLFACE_NONE,
+  Layer,
+  Texture,
+  FILTER_LINEAR,
+  ADDRESS_CLAMP_TO_EDGE,
+  PIXELFORMAT_RGBA8,
   createGraphicsDevice
 } from "https://cdn.jsdelivr.net/npm/playcanvas@2.20.0/+esm";
 
@@ -1078,6 +1086,45 @@ async function clickToCenter(screenX, screenY) {
   recenterOn(await picker.getWorldPointAsync(x, y));
 }
 
+// Shift+left-drag orbits around whatever's under the cursor at drag-start,
+// the way Google Earth's desktop viewer works - handy on laptops where
+// right-click-drag or two-finger-drag orbit gestures are unreliable.
+// Reuses the exact same orbit-around-focus mechanism a normal right-drag
+// already uses (appendOrbitRotate/orbitController, which pivot around
+// pose.getFocus() - always whatever's dead-center on screen) rather than
+// building separate arbitrary-point orbit math: silently reorients (no
+// position change, so no visible fly-to) to look exactly at the picked
+// point first - which makes it the focus, dead-center, without moving the
+// camera - then an ordinary orbit-drag pivots around it for the rest of
+// the gesture. 3D mode only (2D locks pitch to a single top-down value via
+// enter2DMode's pitchRange, which this would fight).
+async function orbitAroundPickedPoint(screenX, screenY) {
+  if (!camera.camera || is2DMode) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const x = screenX - rect.left;
+  const y = screenY - rect.top;
+
+  picker.resize(rect.width, rect.height);
+  picker.prepare(camera.camera, app.scene, [app.scene.layers.getLayerByName("World")]);
+  const hitPoint = await picker.getWorldPointAsync(x, y);
+  if (!hitPoint) return; // missed all geometry - leave dragMode alone (no orbit, no pan)
+
+  recenterAnim = null; // any manual input takes over from an in-progress slide
+
+  pose.look(pose.position, hitPoint);
+  // Authored/derived look-at poses can end up more oblique than our tilt
+  // floor (see applyCameraPose) - clamp on the way in, same as there.
+  pose.angles.x = Math.max(-MAX_PITCH, Math.min(-MIN_PITCH, pose.angles.x));
+  orbitController.attach(pose, false);
+  syncCameraRig();
+
+  viewDistance = Math.max(0.001, Math.min(maxZoomDistance, pose.position.distance(hitPoint)));
+  zoomTarget.copy(hitPoint);
+
+  dragMode = "orbit";
+}
+
 function touchCenterAndDist(activePointers) {
   const [a, b] = Array.from(activePointers.values());
   return {
@@ -1135,13 +1182,22 @@ canvas.addEventListener("pointerdown", event => {
     }
     // A third+ finger is ignored - keep whatever gesture was already active.
   } else if (activePointers.size === 1) {
-    // Mouse (or pen): left button pans, right button orbits.
-    dragMode = event.button === 2 ? "orbit" : "pan";
     lastPointerX = event.clientX;
     lastPointerY = event.clientY;
-    clickCandidateActive = event.button !== 2;
-    clickCandidateX = event.clientX;
-    clickCandidateY = event.clientY;
+
+    if (event.button === 0 && event.shiftKey) {
+      // See orbitAroundPickedPoint - dragMode is set (if at all) once its
+      // async pick resolves, not here.
+      dragMode = null;
+      clickCandidateActive = false;
+      orbitAroundPickedPoint(event.clientX, event.clientY);
+    } else {
+      // Mouse (or pen): left button pans, right button orbits.
+      dragMode = event.button === 2 ? "orbit" : "pan";
+      clickCandidateActive = event.button !== 2;
+      clickCandidateX = event.clientX;
+      clickCandidateY = event.clientY;
+    }
   }
 });
 
@@ -1342,11 +1398,13 @@ app.on("update", dt => {
     // and flying around while browsing a menu would just be disorienting.
     if (vrMenuScreen.enabled) {
       updateVrMenuNavigationInput();
+      vrVignetteTargetIntensity = 0; // updateVrLocomotion isn't running to do this itself
     } else {
       updateVrLocomotion(dt);
     }
     updateVrMenuToggleInput();
   }
+  updateVrVignette(dt);
 
   // Orbit (right-drag/two-finger) and zoom (wheel/pinch) deltas accumulated
   // since last frame get processed and folded into the pose here (this is
@@ -1549,20 +1607,30 @@ if (app.xr) {
   app.xr.input.on("add", inputSource => {
     if (inputSource.handedness === "left") {
       vrLeftInput = inputSource;
-    } else if (inputSource.handedness === "right") {
-      vrRightInput = inputSource;
-      // Right trigger: while the VR timepoint menu is open, confirms
-      // whichever item the left stick has highlighted (see
-      // updateVrMenuNavigationInput) - otherwise, recenters on wherever the
-      // controller is pointing, the same "fly to and orbit around this
-      // point" behavior as a desktop click (see clickToCenter/recenterOn),
-      // just aimed with the controller's ray instead of the mouse. "select"
-      // fires on a full press-and-release, matching a "point, then commit"
-      // click rather than firing the instant the trigger is first touched.
+      // Left trigger: confirms whichever item the left stick has
+      // highlighted in the VR timepoint menu (see
+      // updateVrMenuNavigationInput) - only meaningful while the menu is
+      // open, so this is a no-op otherwise. Kept on the same hand as the
+      // stick doing the navigating (and the X button that opens the menu)
+      // rather than the right trigger, so one hand does the whole
+      // interaction.
       inputSource.on("select", () => {
         if (vrMenuScreen.enabled) {
           selectVrTimepoint(vrMenuItems[vrMenuSelectedIndex].year);
-        } else {
+        }
+      });
+    } else if (inputSource.handedness === "right") {
+      vrRightInput = inputSource;
+      // Right trigger: recenters on wherever the controller is pointing,
+      // the same "fly to and orbit around this point" behavior as a
+      // desktop click (see clickToCenter/recenterOn), just aimed with the
+      // controller's ray instead of the mouse. "select" fires on a full
+      // press-and-release, matching a "point, then commit" click rather
+      // than firing the instant the trigger is first touched. Suppressed
+      // while the VR menu is open so an incidental right-trigger press
+      // doesn't recenter the camera mid-menu-browsing.
+      inputSource.on("select", () => {
+        if (!vrMenuScreen.enabled) {
           vrTriggerRecenter(inputSource);
         }
       });
@@ -1579,6 +1647,14 @@ if (app.xr) {
   app.xr.on("end", () => {
     vrLeftInput = null;
     vrRightInput = null;
+    // Snap off immediately rather than fading - there's nothing to fade
+    // against once the session (and its stereo rendering) has ended.
+    vrVignetteTargetIntensity = 0;
+    vrVignetteIntensity = 0;
+    if (vrVignetteMaterial) {
+      vrVignetteMaterial.opacity = 0;
+      vrVignetteMaterial.update();
+    }
   });
 }
 
@@ -1630,15 +1706,152 @@ function updateVrLocomotion(dt) {
     vrMove.y += -right.y;
   }
 
-  if (vrMove.lengthSq() > 0) {
+  const moving = vrMove.lengthSq() > 0;
+  if (moving) {
     if (vrMove.lengthSq() > 1) vrMove.normalize(); // combined XZ+Y push shouldn't exceed a single stick's max speed
     vrMove.mulScalar(MOVE_SPEED * dt);
     translateCamera(vrMove, { moveZoomTarget: true, trackHeightChange: true });
   }
 
-  if (right && right.x !== 0) {
+  const turning = !!(right && right.x !== 0);
+  if (turning) {
     appendOrbitRotate(right.x * VR_TURN_DEGREES_PER_SECOND * dt, 0);
   }
+
+  // Comfort vignette (see updateVrVignette) - on for either kind of
+  // stick-driven vection, off the instant the stick centers.
+  vrVignetteTargetIntensity = moving || turning ? 1 : 0;
+}
+
+// --------------------------------------------------
+// VR comfort vignette
+//
+// Strongly darkens the periphery of the view while the stick is actively
+// driving movement or turning, and fades it back out the instant it stops -
+// the standard "tunneling" technique VR apps like Google Earth VR use to
+// reduce motion sickness from vection (visually perceived self-motion with
+// no matching real-world motion, which the peripheral/rod-dominated vision
+// is most sensitive to). Implemented as a small quad parented directly to
+// `camera` (not cameraRig) just past the near clip plane, rather than
+// screen-space UI - a world-space object parented to the camera is
+// automatically rendered correctly per-eye by the engine's existing stereo
+// rendering with no VR-specific handling needed, which isn't something to
+// take for granted for 2D/screen-space UI in an XR session.
+// --------------------------------------------------
+
+// Sized in terms of half-angle from the view direction, not just "big
+// enough" - the fully-opaque ring starts at ~38 degrees off-center and the
+// fully-clear zone ends at ~20 degrees, chosen to sit comfortably inside a
+// typical headset's half-FOV (~45-55 degrees) while still clearly reaching
+// full black well before the edge of view. An earlier version sized this
+// relative to the *quad's own* radius without checking the resulting
+// angle, which (at this distance/half-size) put the fully-opaque ring
+// beyond even desktop's 75-degree FOV - invisible, since the entire
+// viewport fell inside the "still transparent" zone. Tunable if it reads
+// as too strong/weak or too tight/loose once tried in an actual headset.
+const VR_VIGNETTE_DISTANCE = 0.08;
+const VR_VIGNETTE_HALF_SIZE = 0.09;
+const VR_VIGNETTE_INNER_FRACTION = 0.32; // ~20 degrees off-center at the distance/half-size above
+const VR_VIGNETTE_OUTER_FRACTION = 0.7; // ~38 degrees off-center
+const VR_VIGNETTE_FADE_SECONDS = 0.25;
+
+let vrVignetteMaterial = null;
+let vrVignetteIntensity = 0; // current, smoothed
+let vrVignetteTargetIntensity = 0; // 1 while actively moving/turning via the stick, 0 otherwise
+let vrVignetteLayer = null;
+let vrVignetteEntity = null;
+
+function createVrVignetteTexture() {
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createRadialGradient(
+    size / 2,
+    size / 2,
+    size * VR_VIGNETTE_INNER_FRACTION,
+    size / 2,
+    size / 2,
+    size * VR_VIGNETTE_OUTER_FRACTION
+  );
+  gradient.addColorStop(0, "rgba(0,0,0,0)");
+  gradient.addColorStop(1, "rgba(0,0,0,1)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  return new Texture(app.graphicsDevice, {
+    name: "VrVignette",
+    width: size,
+    height: size,
+    format: PIXELFORMAT_RGBA8,
+    mipmaps: false,
+    minFilter: FILTER_LINEAR,
+    magFilter: FILTER_LINEAR,
+    addressU: ADDRESS_CLAMP_TO_EDGE,
+    addressV: ADDRESS_CLAMP_TO_EDGE,
+    levels: [canvas]
+  });
+}
+
+function setupVrVignette() {
+  try {
+    vrVignetteMaterial = new StandardMaterial();
+    vrVignetteMaterial.diffuse = new Color(0, 0, 0);
+    vrVignetteMaterial.useLighting = false;
+    vrVignetteMaterial.opacityMap = createVrVignetteTexture();
+    vrVignetteMaterial.blendType = BLEND_NORMAL;
+    vrVignetteMaterial.depthTest = false;
+    vrVignetteMaterial.depthWrite = false;
+    // Safety net, not a load-bearing assumption: PlaneGeometry's normal
+    // faces its local +Y by default, reoriented below (setLocalEulerAngles)
+    // to face back toward the camera - disabling culling entirely means a
+    // sign error there still renders instead of silently vanishing.
+    vrVignetteMaterial.cull = CULLFACE_NONE;
+    vrVignetteMaterial.opacity = 0;
+    vrVignetteMaterial.update();
+
+    const geometry = new PlaneGeometry({ halfExtents: new Vec2(VR_VIGNETTE_HALF_SIZE, VR_VIGNETTE_HALF_SIZE) });
+    const mesh = Mesh.fromGeometry(app.graphicsDevice, geometry);
+    const meshInstance = new MeshInstance(mesh, vrVignetteMaterial);
+
+    // Its own layer, pushed after every existing layer, so it always draws
+    // last regardless of submission/sort order within "World" - combined
+    // with depthTest:false above, this guarantees it's never occluded by
+    // (or occludes) anything else, without needing depth-based sorting.
+    const vignetteLayer = new Layer({ name: "VrVignette" });
+    vrVignetteLayer = vignetteLayer;
+    app.scene.layers.push(vignetteLayer);
+    camera.camera.layers = camera.camera.layers.concat([vignetteLayer.id]);
+
+    const vignetteEntity = new Entity("VrVignette");
+    vrVignetteEntity = vignetteEntity;
+    vignetteEntity.addComponent("render", { meshInstances: [meshInstance] });
+    vignetteEntity.setLocalPosition(0, 0, -VR_VIGNETTE_DISTANCE);
+    vignetteEntity.setLocalEulerAngles(90, 0, 0);
+    // Layers must be set after the entity is parented into the live scene
+    // graph, not before - RenderComponent's layers setter silently no-ops
+    // (never actually registers the mesh instances with the layer at all)
+    // while entity.enabled reads as not-yet-connected, which it is until
+    // addChild below runs.
+    camera.addChild(vignetteEntity);
+    vignetteEntity.render.layers = [vignetteLayer.id];
+  } catch (e) {
+    console.warn("VR comfort vignette unavailable:", e);
+    vrVignetteMaterial = null;
+  }
+}
+setupVrVignette();
+
+// Runs every frame regardless of XR/menu state (unlike updateVrLocomotion,
+// which only sets the *target* intensity, and only while actively flying)
+// so the fade-out still completes smoothly after the stick centers, the
+// menu opens, or the VR session ends.
+function updateVrVignette(dt) {
+  if (!vrVignetteMaterial) return;
+  vrVignetteIntensity += (vrVignetteTargetIntensity - vrVignetteIntensity) * Math.min(1, dt / VR_VIGNETTE_FADE_SECONDS);
+  vrVignetteMaterial.opacity = vrVignetteIntensity;
+  vrVignetteMaterial.update();
 }
 
 // A permanently-existing, never-visibly-rendered camera used solely to turn
@@ -2269,22 +2482,36 @@ function updateVrMenuToggleInput() {
 // of flying (see the update loop, which calls this in place of
 // updateVrLocomotion whenever vrMenuScreen.enabled) - one step per push,
 // re-armed once the stick returns near center, same debounce idea as the
-// old snap-turn.
+// old snap-turn. Pressing the stick itself also confirms the highlighted
+// item, as an alternative to the left trigger - handy since the thumb is
+// already on the stick while navigating.
 let vrMenuStickArmed = true;
+let vrMenuStickClickWasPressed = false;
 function updateVrMenuNavigationInput() {
   const left = readVrStick(vrLeftInput);
-  if (!left) return;
-
-  if (Math.abs(left.y) > 0.6) {
-    if (vrMenuStickArmed) {
-      // Stick "up" (forward, away from the thumb) is negative y - move to
-      // the previous (higher, per how items are laid out) item.
-      moveVrMenuSelection(left.y < 0 ? -1 : 1);
-      vrMenuStickArmed = false;
+  if (left) {
+    if (Math.abs(left.y) > 0.6) {
+      if (vrMenuStickArmed) {
+        // Stick "up" (forward, away from the thumb) is negative y - move to
+        // the previous (higher, per how items are laid out) item.
+        moveVrMenuSelection(left.y < 0 ? -1 : 1);
+        vrMenuStickArmed = false;
+      }
+    } else if (Math.abs(left.y) < 0.3) {
+      vrMenuStickArmed = true;
     }
-  } else if (Math.abs(left.y) < 0.3) {
-    vrMenuStickArmed = true;
   }
+
+  // Button 3 is the left controller's thumbstick click under the
+  // xr-standard gamepad mapping (see updateVrMenuToggleInput for the rest
+  // of the mapping).
+  const gamepad = vrLeftInput && vrLeftInput.gamepad;
+  const buttons = gamepad && gamepad.buttons;
+  const stickClickPressed = !!(buttons && buttons[3] && buttons[3].pressed);
+  if (stickClickPressed && !vrMenuStickClickWasPressed) {
+    selectVrTimepoint(vrMenuItems[vrMenuSelectedIndex].year);
+  }
+  vrMenuStickClickWasPressed = stickClickPressed;
 }
 
 if (app.xr) {
@@ -2292,6 +2519,7 @@ if (app.xr) {
     vrMenuScreen.enabled = false;
     vrMenuButtonWasPressed = false;
     vrMenuStickArmed = true;
+    vrMenuStickClickWasPressed = false;
   });
 }
 
@@ -2330,6 +2558,32 @@ window.__debug = {
     getSelectedIndex: () => vrMenuSelectedIndex,
     moveSelection: delta => moveVrMenuSelection(delta),
     confirmSelection: () => selectVrTimepoint(vrMenuItems[vrMenuSelectedIndex].year)
+  },
+  vrVignette: {
+    // Forces the intensity directly (bypassing the fade and the "only
+    // while actively flying in VR" gating) purely so the quad/gradient/
+    // orientation can be checked outside an actual XR session.
+    forceIntensity: value => {
+      if (!vrVignetteMaterial) return false;
+      vrVignetteIntensity = value;
+      vrVignetteTargetIntensity = value;
+      vrVignetteMaterial.opacity = value;
+      vrVignetteMaterial.update();
+      return true;
+    },
+    getIntensity: () => vrVignetteIntensity,
+    debugInfo: () => ({
+      cameraLayers: camera.camera.layers.slice(),
+      vignetteLayerId: vrVignetteLayer && vrVignetteLayer.id,
+      layerMeshInstanceCount: vrVignetteLayer && vrVignetteLayer.meshInstances.length,
+      entityEnabled: vrVignetteEntity && vrVignetteEntity.enabled,
+      renderEnabled: vrVignetteEntity && vrVignetteEntity.render && vrVignetteEntity.render.enabled,
+      renderLayers: vrVignetteEntity && vrVignetteEntity.render && vrVignetteEntity.render.layers.slice(),
+      localPosition: vrVignetteEntity && vrVignetteEntity.getLocalPosition().clone(),
+      worldPosition: vrVignetteEntity && vrVignetteEntity.getPosition().clone(),
+      opacity: vrVignetteMaterial && vrVignetteMaterial.opacity,
+      blendType: vrVignetteMaterial && vrVignetteMaterial.blendType
+    })
   }
 };
 
