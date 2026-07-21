@@ -242,13 +242,33 @@ window.addEventListener("resize", () => app.resizeCanvas());
 
 // Cap GPU memory so phones can handle a 30M+ gaussian source scene - the
 // streamed LOD system uses this budget to pick how much detail to keep
-// resident regardless of the full scene's size.
+// resident regardless of the full scene's size. Phone-class GPUs (and
+// Quest's, which reports as Android/mobile too) need the tightest cap;
+// desktop can hold more; an active VR session sits in between - matching
+// a phone's GPU headroom but rendered stereo (two views to keep fed), and
+// switched to dynamically on top of the mobile/desktop base the instant a
+// session actually starts, rather than guessed from the UA up front.
+const IS_MOBILE_DEVICE = /Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent);
+const SPLAT_BUDGET_MOBILE = 2_000_000;
+const SPLAT_BUDGET_DESKTOP = 4_000_000;
+const SPLAT_BUDGET_VR = 3_000_000;
+const splatBudgetBase = IS_MOBILE_DEVICE ? SPLAT_BUDGET_MOBILE : SPLAT_BUDGET_DESKTOP;
+
 if (app.scene.gsplat) {
-  app.scene.gsplat.splatBudget = 3_500_000;
+  app.scene.gsplat.splatBudget = splatBudgetBase;
   // Required for gsplat entities to participate in Picker hit-testing at
   // all (see clickToCenter below) - without this, the picker's ID/depth
   // buffer never gets gsplat contributions, so every pick silently misses.
   app.scene.gsplat.enableIds = true;
+
+  if (app.xr) {
+    app.xr.on("start", () => {
+      app.scene.gsplat.splatBudget = SPLAT_BUDGET_VR;
+    });
+    app.xr.on("end", () => {
+      app.scene.gsplat.splatBudget = splatBudgetBase;
+    });
+  }
 }
 
 // The camera sits under a "rig" entity: our orbit/pan/zoom/WASD logic moves
