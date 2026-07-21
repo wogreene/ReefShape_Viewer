@@ -2539,27 +2539,6 @@ vrMenuScreen.setLocalScale(VR_MENU_SCALE, VR_MENU_SCALE, VR_MENU_SCALE);
 vrMenuScreen.enabled = false;
 app.root.addChild(vrMenuScreen);
 
-// Opening the menu excludes the comfort vignette's layer from the camera
-// entirely (restored on close) - the vignette's own opacity fade (see
-// updateVrVignette) fades it to 0 while the menu is open, but that alone
-// didn't reliably keep the menu visible in practice (the menu worked fine
-// functionally - stick nav + trigger still switched timepoints - it just
-// wasn't visible, silently hidden behind the vignette's layer). Excluding
-// the layer outright removes any chance of the two interacting, whatever
-// the exact mechanism.
-function setVrMenuOpen(open) {
-  vrMenuScreen.enabled = open;
-
-  if (!vrVignetteLayer || !camera.camera) return;
-  const layers = camera.camera.layers;
-  const hasVignetteLayer = layers.includes(vrVignetteLayer.id);
-  if (open && hasVignetteLayer) {
-    camera.camera.layers = layers.filter(id => id !== vrVignetteLayer.id);
-  } else if (!open && !hasVignetteLayer) {
-    camera.camera.layers = layers.concat([vrVignetteLayer.id]);
-  }
-}
-
 const VR_MENU_HIGHLIGHT_COLOR = new Color(0.4, 1, 0.5);
 const VR_MENU_DEFAULT_COLOR = new Color(1, 1, 1);
 
@@ -2618,7 +2597,7 @@ function selectVrTimepoint(year) {
     select.value = year; // keep the desktop dropdown in sync
     loadTimepoint(splats[year]);
   }
-  setVrMenuOpen(false);
+  vrMenuScreen.enabled = false;
   updateVrMenuHighlight();
 }
 
@@ -2639,12 +2618,12 @@ function openVrMenu() {
   const currentIndex = years.indexOf(select.value);
   vrMenuSelectedIndex = currentIndex === -1 ? 0 : currentIndex;
   updateVrMenuHighlight();
-  setVrMenuOpen(true);
+  vrMenuScreen.enabled = true;
 }
 
 function toggleVrMenu() {
   if (vrMenuScreen.enabled) {
-    setVrMenuOpen(false);
+    vrMenuScreen.enabled = false;
   } else {
     openVrMenu();
   }
@@ -2702,7 +2681,7 @@ function updateVrMenuNavigationInput() {
 
 if (app.xr) {
   app.xr.on("end", () => {
-    setVrMenuOpen(false);
+    vrMenuScreen.enabled = false;
     vrMenuButtonWasPressed = false;
     vrMenuStickArmed = true;
     vrMenuStickClickWasPressed = false;
@@ -2737,7 +2716,7 @@ window.__debug = {
   }),
   vrMenu: {
     open: () => openVrMenu(),
-    close: () => setVrMenuOpen(false),
+    close: () => { vrMenuScreen.enabled = false; },
     select: year => selectVrTimepoint(year),
     isOpen: () => vrMenuScreen.enabled,
     getItems: () => vrMenuItems.map(({ year, entity }) => ({
