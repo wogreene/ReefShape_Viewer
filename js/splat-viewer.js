@@ -1659,6 +1659,11 @@ function readVrStick(inputSource) {
 const vrFlatForward = new Vec3();
 const vrFlatRight = new Vec3();
 const vrMove = new Vec3();
+const vrUpAxis = new Vec3();
+const worldUpConst = new Vec3(0, 1, 0);
+const vrSpinDelta = new Quat();
+const vrSpinNewRot = new Quat();
+const vrSpinNewPos = new Vec3();
 
 function updateVrLocomotion(dt) {
   const left = readVrStick(vrLeftInput);
@@ -1666,13 +1671,26 @@ function updateVrLocomotion(dt) {
 
   vrMove.set(0, 0, 0);
 
+  // "Straight up" from the reef's own perspective - world Y normally, but
+  // wherever that direction ended up after a world-flip (see "VR world
+  // tilt" above) once tilted. For a flat/horizontal reef, world Y happens
+  // to serve three roles at once: the axis you flatten forward/right
+  // against for level glide movement, the vertical-lift axis, and the
+  // turn/yaw axis - this generalizes all three to whatever the reef's
+  // rotated normal currently is, so glide/lift/turn all keep meaning the
+  // same thing relative to the reef regardless of its orientation. Without
+  // this, flattening against a stale world-Y let the tilted reef's own
+  // normal leak into "forward," which read as an unwanted zoom instead of
+  // a level glide.
+  worldRoot.getLocalRotation().transformVector(worldUpConst, vrUpAxis);
+
   if (left) {
     vrFlatForward.copy(camera.forward);
-    vrFlatForward.y = 0;
+    vrFlatForward.addScaled(vrUpAxis, -vrFlatForward.dot(vrUpAxis));
     if (vrFlatForward.lengthSq() > 1e-8) vrFlatForward.normalize();
 
     vrFlatRight.copy(camera.right);
-    vrFlatRight.y = 0;
+    vrFlatRight.addScaled(vrUpAxis, -vrFlatRight.dot(vrUpAxis));
     if (vrFlatRight.lengthSq() > 1e-8) vrFlatRight.normalize();
 
     // Stick Y is negative when pushed forward (away from the thumb).
@@ -1680,7 +1698,7 @@ function updateVrLocomotion(dt) {
   }
 
   if (right) {
-    vrMove.y += -right.y;
+    vrMove.addScaled(vrUpAxis, -right.y);
   }
 
   const moving = vrMove.lengthSq() > 0;
@@ -1692,7 +1710,27 @@ function updateVrLocomotion(dt) {
 
   const turning = !!(right && right.x !== 0);
   if (turning) {
-    appendOrbitRotate(right.x * VR_TURN_DEGREES_PER_SECOND * dt, 0);
+    if (worldFlipped) {
+      // "Rotate the scene" instead of turning the camera - pose.angles'
+      // yaw is hardcoded to spin about world Y, which post-flip is no
+      // longer the reef's own up axis, so turning the *camera* that way
+      // would make the tilted reef appear to tilt/rock rather than stay
+      // level as you look around it. Spinning worldRoot about vrUpAxis
+      // instead keeps the reef level through the turn, exactly like
+      // ordinary yaw does pre-flip. Pivots around the same fixed point
+      // the flip itself pivoted around (worldFlipPivot - see
+      // toggleWorldFlip) using the identical pivot-preserving math, just
+      // applied incrementally each frame instead of as a one-time
+      // animated transition.
+      vrSpinDelta.setFromAxisAngle(vrUpAxis, right.x * VR_TURN_DEGREES_PER_SECOND * dt);
+      vrSpinNewRot.mul2(vrSpinDelta, worldRoot.getLocalRotation());
+      vrSpinNewRot.transformVector(worldFlipPivot, vrSpinNewPos);
+      vrSpinNewPos.sub2(worldFlipPivot, vrSpinNewPos);
+      worldRoot.setLocalRotation(vrSpinNewRot);
+      worldRoot.setLocalPosition(vrSpinNewPos);
+    } else {
+      appendOrbitRotate(right.x * VR_TURN_DEGREES_PER_SECOND * dt, 0);
+    }
   }
 
   // Comfort vignette (see updateVrVignette) - on for either kind of
@@ -1850,7 +1888,24 @@ function updateVrWorldFlipToggleInput() {
 //    angles in close to center (moderate clear cone, opaque well before
 //    any real FOV edge) is what actually produces "solid black at the
 //    edges, narrow FOV in the middle" rather than a faint all-over tint.
-const VR_VIGNETTE_DISTANCE = 0.08;
+// 3) VR_VIGNETTE_DISTANCE itself needs to be large, not small - a quad
+//    placed close to the camera (as an early version did, ~0.08m) sits
+//    close enough that each eye's own ~63mm IPD offset from the shared
+//    head/camera transform meaningfully changes the *angle* each eye sees
+//    it at (this is a single object parented to the shared camera, not a
+//    genuinely separate per-eye render - PlayCanvas's screen-space UI,
+//    the alternative that would sidestep this, isn't reliably XR-aware
+//    either, see the note above on why this is world-space to begin
+//    with). At close range that per-eye angular difference is large
+//    enough to read as a disorienting cross-eyed convergence rather than
+//    a shared, centered mask. Parallax angle is approximately atan((IPD/2)
+//    / distance), so pushing distance out instead shrinks it toward
+//    negligible - 40m gives under 0.05 degrees, imperceptible for a soft
+//    vignette gradient - while staying safely inside the camera's far
+//    clip, which updateZoomRange guarantees is always at least 120
+//    (maxZoomDistance floors at 60, farClip is double that) regardless of
+//    any given reef's actual scale.
+const VR_VIGNETTE_DISTANCE = 40;
 const VR_VIGNETTE_INNER_ANGLE_DEG = 10; // fully transparent within this angle of view center
 const VR_VIGNETTE_OUTER_ANGLE_DEG = 20; // fully opaque black from this angle outward
 const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85; // physical extent of the quad itself
