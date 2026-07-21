@@ -1883,9 +1883,9 @@ function updateVrWorldFlipToggleInput() {
 // the standard "tunneling" technique VR apps like Google Earth VR use to
 // reduce motion sickness from vection (visually perceived self-motion with
 // no matching real-world motion, which the peripheral/rod-dominated vision
-// is most sensitive to). Implemented as a small quad parented directly to
-// `camera` (not cameraRig) just past the near clip plane, rather than
-// screen-space UI - a world-space object parented to the camera is
+// is most sensitive to). Implemented as a quad parented directly to
+// `camera` (not cameraRig) a few meters out, rather than screen-space UI -
+// a world-space object parented to the camera is
 // automatically rendered correctly per-eye by the engine's existing stereo
 // rendering with no VR-specific handling needed, which isn't something to
 // take for granted for 2D/screen-space UI in an XR session.
@@ -1905,7 +1905,18 @@ function updateVrWorldFlipToggleInput() {
 // so the quad is simply built wider than tall from the start to
 // compensate, rather than computed from the device's actual per-eye
 // optics - simple and tunable if it still reads wrong.
-const VR_VIGNETTE_DISTANCE = 40;
+//
+// VR_VIGNETTE_DISTANCE was pushed out to 40 at one point to fight a
+// cross-eyed-looking offset between the eyes (each eye's ~63mm IPD offset
+// from the shared camera transform changes the *angle* a nearby object is
+// seen at more than a distant one) - but at that distance, hitting the
+// same angular coverage needs a genuinely enormous quad (hundreds of
+// units across), which turned out to render as nothing at all on real
+// hardware. A modest few meters keeps the parallax angle low enough to be
+// unnoticeable for a soft gradient anyway (atan(0.0315/3) is well under a
+// degree, against ~21 degrees at the 0.08m an early version used) while
+// keeping the quad itself a normal, reasonable size.
+const VR_VIGNETTE_DISTANCE = 3;
 const VR_VIGNETTE_WIDEN = 1.5; // width multiplier - tune this if it still reads non-circular
 const VR_VIGNETTE_INNER_ANGLE_DEG = 10; // fully transparent within this angle of view center
 const VR_VIGNETTE_OUTER_ANGLE_DEG = 20; // fully opaque black from this angle outward
