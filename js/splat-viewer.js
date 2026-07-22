@@ -45,9 +45,13 @@ import {
   StandardMaterial,
   Picker,
   TorusGeometry,
+  PlaneGeometry,
   Mesh,
   MeshInstance,
   BLEND_ADDITIVE,
+  BLEND_NORMAL,
+  CULLFACE_NONE,
+  Layer,
   Texture,
   FILTER_LINEAR,
   ADDRESS_CLAMP_TO_EDGE,
@@ -1643,8 +1647,9 @@ if (app.xr) {
     // against once the session (and its stereo rendering) has ended.
     vrVignetteTargetIntensity = 0;
     vrVignetteIntensity = 0;
-    if (vrVignetteImage) {
-      vrVignetteImage.element.opacity = 0;
+    if (vrVignetteMaterial) {
+      vrVignetteMaterial.opacity = 0;
+      vrVignetteMaterial.update();
     }
   });
 }
@@ -1878,57 +1883,48 @@ function updateVrWorldFlipToggleInput() {
 // the standard "tunneling" technique VR apps like Google Earth VR use to
 // reduce motion sickness from vection (visually perceived self-motion with
 // no matching real-world motion, which the peripheral/rod-dominated vision
-// is most sensitive to).
+// is most sensitive to). Implemented as a small quad parented directly to
+// `camera` (not cameraRig) just past the near clip plane, rather than
+// screen-space UI - a world-space object parented to the camera is
+// automatically rendered correctly per-eye by the engine's existing stereo
+// rendering with no VR-specific handling needed, which isn't something to
+// take for granted for 2D/screen-space UI in an XR session.
 //
-// Built as a world-space Screen + Image element parented to `camera`,
-// exactly mirroring the VR timepoint menu (see "VR timepoint menu" below) -
-// not the original design. An earlier version used a raw mesh (a
-// PlaneGeometry + StandardMaterial + a dedicated render Layer added to
-// camera.camera.layers): every piece of that setup checked out correct via
-// __debug.vrVignette.debugInfo() (mesh instance registered, layer present
-// on the camera, opacity applied) and it rendered fine in desktop testing,
-// but stayed completely invisible on real headset hardware regardless -
-// something about that path doesn't actually draw in a real XR session,
-// for reasons that didn't show up in any log or debug state. The VR menu's
-// Screen+Element approach is proven to actually render in that same real
-// session (once its own separate canvas-texture bug was fixed - see
-// createVrMenuLabelTexture), so the vignette now reuses that exact
-// mechanism instead of the mesh/Layer one, rather than continuing to
-// debug a path with no visible failure signal.
+// This is deliberately back to the very first version of this feature -
+// several subsequent rewrites (aspect-corrected sizing, a much larger
+// distance/quad to fight eye parallax, a Screen+Element version matching
+// the VR menu, explicit per-frame repositioning) each fixed something on
+// paper, verified correct via __debug.vrVignette.debugInfo() and desktop
+// screenshots, and then stayed invisible or made things worse on the one
+// thing that actually matters - real headset hardware. This version, by
+// contrast, is the one that actually showed something on a real headset,
+// even with known rough edges (reads as an oval rather than a circle, and
+// a mild cross-eyed offset at this close range) - better a working
+// vignette with cosmetic issues than a theoretically-more-correct one
+// that doesn't render at all.
 // --------------------------------------------------
 
-// Sized in terms of half-angle from the view direction rather than a flat
-// world-space size, so the fully-opaque ring sits at a known angle off
-// center and the panel's own extent reaches well past any real headset's
-// FOV (a square panel's diagonal reach exceeds its edge reach, mirroring
-// how a headset's diagonal FOV exceeds its horizontal/vertical FOV).
-//
-// VR_VIGNETTE_WIDEN is the one empirical fudge factor here: measured on
-// hardware as reading taller than wide (an isotropic panel doesn't
-// necessarily project as a circle - PlayCanvas's XR rendering hands each
-// eye its own projection matrix straight from the device, bypassing
-// camera.fov/aspectRatio's usual aspect-consistent derivation entirely),
-// so the panel is simply built wider than tall from the start to
-// compensate, rather than computed from the device's actual per-eye
-// optics - simple and tunable if it still reads wrong.
-const VR_VIGNETTE_DISTANCE = 3; // meters in front of the camera
-const VR_VIGNETTE_WIDEN = 1.5; // width multiplier - tune this if it still reads non-circular
-const VR_VIGNETTE_INNER_ANGLE_DEG = 10; // fully transparent within this angle of view center
-const VR_VIGNETTE_OUTER_ANGLE_DEG = 20; // fully opaque black from this angle outward
-const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85; // physical extent of the panel itself
-const VR_VIGNETTE_HALF_SIZE = VR_VIGNETTE_DISTANCE * Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
-const VR_VIGNETTE_INNER_FRACTION =
-  Math.tan((VR_VIGNETTE_INNER_ANGLE_DEG * Math.PI) / 180) / Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
-const VR_VIGNETTE_OUTER_FRACTION =
-  Math.tan((VR_VIGNETTE_OUTER_ANGLE_DEG * Math.PI) / 180) / Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
+// Sized in terms of half-angle from the view direction, not just "big
+// enough" - the fully-opaque ring starts at ~38 degrees off-center and the
+// fully-clear zone ends at ~20 degrees, chosen to sit comfortably inside a
+// typical headset's half-FOV (~45-55 degrees) while still clearly reaching
+// full black well before the edge of view. An earlier version sized this
+// relative to the *quad's own* radius without checking the resulting
+// angle, which (at this distance/half-size) put the fully-opaque ring
+// beyond even desktop's 75-degree FOV - invisible, since the entire
+// viewport fell inside the "still transparent" zone. Tunable if it reads
+// as too strong/weak or too tight/loose once tried in an actual headset.
+const VR_VIGNETTE_DISTANCE = 0.08;
+const VR_VIGNETTE_HALF_SIZE = 0.09;
+const VR_VIGNETTE_INNER_FRACTION = 0.32; // ~20 degrees off-center at the distance/half-size above
+const VR_VIGNETTE_OUTER_FRACTION = 0.7; // ~38 degrees off-center
 const VR_VIGNETTE_FADE_SECONDS = 0.25;
-const VR_VIGNETTE_SCALE = 0.01; // world meters per UI unit (1 UI unit = 1cm)
 
-let vrVignetteScreen = null; // repositioned explicitly every frame - see updateVrVignette
-let vrVignetteImage = null; // the Image element itself, whose .opacity drives the fade
+let vrVignetteMaterial = null;
 let vrVignetteIntensity = 0; // current, smoothed
 let vrVignetteTargetIntensity = 0; // 1 while actively moving/turning via the stick, 0 otherwise
-const vrVignetteWorldPos = new Vec3();
+let vrVignetteLayer = null;
+let vrVignetteEntity = null;
 
 function createVrVignetteTexture() {
   const size = 256;
@@ -1951,12 +1947,13 @@ function createVrVignetteTexture() {
 
   // Pixel data (via getImageData), not the canvas element itself, as the
   // texture source - passing a <canvas> straight to a WebGL texture upload
-  // triggers Chromium's GPU-to-GPU "shared image"/mailbox fast path on some
-  // Android GPU configurations (Quest's browser included), which can fail
-  // outright (GL_INVALID_OPERATION "texture is not a shared image" /
-  // "invalid mailbox name") and leave the texture blank - functionally
-  // fine, just invisible. A plain typed-array upload goes through the
-  // ordinary CPU-to-GPU path instead, sidestepping that entirely.
+  // can trigger Chromium's GPU-to-GPU "shared image"/mailbox fast path on
+  // some Android GPU configurations, which can fail outright
+  // (GL_INVALID_OPERATION "texture is not a shared image" / "invalid
+  // mailbox name") and leave the texture blank - a plain typed-array
+  // upload goes through the ordinary CPU-to-GPU path instead, sidestepping
+  // that possibility entirely regardless of whether it was ever actually
+  // hit here.
   const imageData = ctx.getImageData(0, 0, size, size);
 
   return new Texture(app.graphicsDevice, {
@@ -1975,55 +1972,49 @@ function createVrVignetteTexture() {
 
 function setupVrVignette() {
   try {
-    const widthUnits = (VR_VIGNETTE_HALF_SIZE * 2 * VR_VIGNETTE_WIDEN) / VR_VIGNETTE_SCALE;
-    const heightUnits = (VR_VIGNETTE_HALF_SIZE * 2) / VR_VIGNETTE_SCALE;
+    vrVignetteMaterial = new StandardMaterial();
+    vrVignetteMaterial.diffuse = new Color(0, 0, 0);
+    vrVignetteMaterial.useLighting = false;
+    vrVignetteMaterial.opacityMap = createVrVignetteTexture();
+    vrVignetteMaterial.blendType = BLEND_NORMAL;
+    vrVignetteMaterial.depthTest = false;
+    vrVignetteMaterial.depthWrite = false;
+    // Safety net, not a load-bearing assumption: PlaneGeometry's normal
+    // faces its local +Y by default, reoriented below (setLocalEulerAngles)
+    // to face back toward the camera - disabling culling entirely means a
+    // sign error there still renders instead of silently vanishing.
+    vrVignetteMaterial.cull = CULLFACE_NONE;
+    vrVignetteMaterial.opacity = 0;
+    vrVignetteMaterial.update();
 
-    const screen = new Entity("VrVignetteScreen");
-    vrVignetteScreen = screen;
-    // ScreenComponent's own resolution defaults to a fixed (640, 320) -
-    // it does NOT auto-match whatever referenceResolution is passed in,
-    // despite how that reads. Left alone, that mismatch feeds into an
-    // internal auto-scale factor (comparing resolution against
-    // referenceResolution) that silently shrank this panel to a fraction
-    // of its intended size. Setting resolution explicitly to the exact
-    // same Vec2 as referenceResolution keeps that auto-scale factor at
-    // exactly 1, so widthUnits/heightUnits below map to world meters
-    // through nothing but VR_VIGNETTE_SCALE.
-    const vignetteResolution = new Vec2(widthUnits, heightUnits);
-    screen.addComponent("screen", { screenSpace: false, referenceResolution: vignetteResolution });
-    screen.screen.resolution = vignetteResolution;
-    screen.setLocalScale(VR_VIGNETTE_SCALE, VR_VIGNETTE_SCALE, VR_VIGNETTE_SCALE);
-    // A root-level entity, repositioned explicitly every frame (see
-    // updateVrVignette) from camera.getPosition()/camera.getRotation(),
-    // rather than a child of `camera` relying on ordinary parent-child
-    // transform inheritance to follow the headset. That's the same
-    // approach the VR menu already uses successfully (it repositions
-    // itself from camera.getPosition()/camera.forward once, at open time) -
-    // a version of the vignette parented directly to camera went through
-    // two full rewrites (a raw mesh, then a Screen+Element identical to
-    // this one) and stayed invisible on real hardware both times despite
-    // every piece of debug state checking out correct, which points at
-    // something about child-of-camera specifically, not the rendering
-    // mechanism itself.
-    app.root.addChild(screen);
+    const geometry = new PlaneGeometry({ halfExtents: new Vec2(VR_VIGNETTE_HALF_SIZE, VR_VIGNETTE_HALF_SIZE) });
+    const mesh = Mesh.fromGeometry(app.graphicsDevice, geometry);
+    const meshInstance = new MeshInstance(mesh, vrVignetteMaterial);
 
-    const image = new Entity("VrVignetteImage");
-    vrVignetteImage = image;
-    image.addComponent("element", {
-      type: ELEMENTTYPE_IMAGE,
-      texture: createVrVignetteTexture(),
-      color: new Color(1, 1, 1),
-      opacity: 0,
-      width: widthUnits,
-      height: heightUnits,
-      pivot: [0.5, 0.5],
-      anchor: [0.5, 0.5, 0.5, 0.5],
-      useInput: false
-    });
-    screen.addChild(image);
+    // Its own layer, pushed after every existing layer, so it always draws
+    // last regardless of submission/sort order within "World" - combined
+    // with depthTest:false above, this guarantees it's never occluded by
+    // (or occludes) anything else, without needing depth-based sorting.
+    const vignetteLayer = new Layer({ name: "VrVignette" });
+    vrVignetteLayer = vignetteLayer;
+    app.scene.layers.push(vignetteLayer);
+    camera.camera.layers = camera.camera.layers.concat([vignetteLayer.id]);
+
+    const vignetteEntity = new Entity("VrVignette");
+    vrVignetteEntity = vignetteEntity;
+    vignetteEntity.addComponent("render", { meshInstances: [meshInstance] });
+    vignetteEntity.setLocalPosition(0, 0, -VR_VIGNETTE_DISTANCE);
+    vignetteEntity.setLocalEulerAngles(90, 0, 0);
+    // Layers must be set after the entity is parented into the live scene
+    // graph, not before - RenderComponent's layers setter silently no-ops
+    // (never actually registers the mesh instances with the layer at all)
+    // while entity.enabled reads as not-yet-connected, which it is until
+    // addChild below runs.
+    camera.addChild(vignetteEntity);
+    vignetteEntity.render.layers = [vignetteLayer.id];
   } catch (e) {
     console.warn("VR comfort vignette unavailable:", e);
-    vrVignetteImage = null;
+    vrVignetteMaterial = null;
   }
 }
 setupVrVignette();
@@ -2033,17 +2024,10 @@ setupVrVignette();
 // so the fade-out still completes smoothly after the stick centers, the
 // menu opens, or the VR session ends.
 function updateVrVignette(dt) {
-  if (!vrVignetteImage) return;
+  if (!vrVignetteMaterial) return;
   vrVignetteIntensity += (vrVignetteTargetIntensity - vrVignetteIntensity) * Math.min(1, dt / VR_VIGNETTE_FADE_SECONDS);
-  vrVignetteImage.element.opacity = vrVignetteIntensity;
-
-  // Explicit every frame, not a one-time parent-child setup - see
-  // vrVignetteScreen's declaration for why.
-  if (camera.camera) {
-    vrVignetteWorldPos.copy(camera.getPosition()).addScaled(camera.forward, VR_VIGNETTE_DISTANCE);
-    vrVignetteScreen.setPosition(vrVignetteWorldPos);
-    vrVignetteScreen.setRotation(camera.getRotation());
-  }
+  vrVignetteMaterial.opacity = vrVignetteIntensity;
+  vrVignetteMaterial.update();
 }
 
 // A permanently-existing, never-visibly-rendered camera used solely to turn
@@ -2796,28 +2780,28 @@ window.__debug = {
   },
   vrVignette: {
     // Forces the intensity directly (bypassing the fade and the "only
-    // while actively flying in VR" gating) purely so the gradient/
+    // while actively flying in VR" gating) purely so the quad/gradient/
     // orientation can be checked outside an actual XR session.
     forceIntensity: value => {
-      if (!vrVignetteImage) return false;
+      if (!vrVignetteMaterial) return false;
       vrVignetteIntensity = value;
       vrVignetteTargetIntensity = value;
-      vrVignetteImage.element.opacity = value;
+      vrVignetteMaterial.opacity = value;
+      vrVignetteMaterial.update();
       return true;
     },
     getIntensity: () => vrVignetteIntensity,
     debugInfo: () => ({
-      entityEnabled: vrVignetteImage && vrVignetteImage.enabled,
-      elementEnabled: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.enabled,
-      elementLayers: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.layers.slice(),
-      screenLocalPosition: vrVignetteImage && vrVignetteImage.parent && vrVignetteImage.parent.getLocalPosition().clone(),
-      worldPosition: vrVignetteImage && vrVignetteImage.getPosition().clone(),
-      screenScale: vrVignetteScreen && vrVignetteScreen.screen && vrVignetteScreen.screen.scale,
-      width: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.width,
-      height: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.height,
-      calculatedWidth: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.calculatedWidth,
-      calculatedHeight: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.calculatedHeight,
-      opacity: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.opacity
+      cameraLayers: camera.camera.layers.slice(),
+      vignetteLayerId: vrVignetteLayer && vrVignetteLayer.id,
+      layerMeshInstanceCount: vrVignetteLayer && vrVignetteLayer.meshInstances.length,
+      entityEnabled: vrVignetteEntity && vrVignetteEntity.enabled,
+      renderEnabled: vrVignetteEntity && vrVignetteEntity.render && vrVignetteEntity.render.enabled,
+      renderLayers: vrVignetteEntity && vrVignetteEntity.render && vrVignetteEntity.render.layers.slice(),
+      localPosition: vrVignetteEntity && vrVignetteEntity.getLocalPosition().clone(),
+      worldPosition: vrVignetteEntity && vrVignetteEntity.getPosition().clone(),
+      opacity: vrVignetteMaterial && vrVignetteMaterial.opacity,
+      blendType: vrVignetteMaterial && vrVignetteMaterial.blendType
     })
   }
 };
