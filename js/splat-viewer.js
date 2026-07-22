@@ -1625,12 +1625,28 @@ let vrRightInput = null;
 // Right trigger "grab and drag" state - see updateVrLocomotion for the
 // actual drag logic and the right-hand "select" handler below for how
 // this suppresses the tap-to-recenter behavior once a real drag happens.
-const VR_GRAB_DRAG_TAP_THRESHOLD = 0.02; // meters of accumulated hand movement before a hold counts as a drag, not a tap
-let vrGrabDragActive = false;
+// Modeled after the same "point under the cursor stays under the cursor"
+// idea desktop/mobile planar pan already uses (see planarPanDrag), just
+// with a real ray-plane intersection instead of an FOV-based approximation
+// - established once, from an actual pick against the reef, right as the
+// trigger goes down: the pick result becomes a point on a plane (normal =
+// vrUpAxis, so it's the reef's own "horizontal" even post-flip), and every
+// frame afterward, wherever the ray currently crosses that same plane is
+// where the grabbed point needs to be dragged to.
+const VR_GRAB_DRAG_TAP_THRESHOLD = 0.02; // meters of accumulated plane-space movement before a hold counts as a drag, not a tap
+let vrGrabDragActive = false; // true once the initial pick resolves and the plane is live
+let vrGrabPickInFlight = false; // true while that initial pick is still resolving
+let vrGrabHasPreviousRayPoint = false; // true once at least one ray/plane intersection has been recorded this hold
 let vrGrabAccumulatedDistance = 0;
 let vrRightDragOccurred = false;
-const vrGrabPreviousPos = new Vec3();
+const vrGrabPlanePoint = new Vec3();
+const vrGrabPlaneNormal = new Vec3();
+const vrGrabRayOrigin = new Vec3();
+const vrGrabRayDirection = new Vec3();
+const vrGrabRayPoint = new Vec3();
+const vrGrabPreviousRayPoint = new Vec3();
 const vrGrabDelta = new Vec3();
+const vrGrabPlaneToOrigin = new Vec3();
 
 // --------------------------------------------------
 // VR controller visualization
@@ -1643,7 +1659,7 @@ const vrGrabDelta = new Vec3();
 // app.drawLine rather than a persistent mesh, same idea as the desktop
 // click marker being a one-off visual rather than always-on geometry.
 // --------------------------------------------------
-const VR_POINTER_RAY_LENGTH = 5;
+const VR_POINTER_RAY_LENGTH = 2.5;
 const vrControllerMarkerMaterial = new StandardMaterial();
 vrControllerMarkerMaterial.emissive = new Color(1, 1, 1);
 vrControllerMarkerMaterial.emissiveIntensity = 1.5;
@@ -1740,6 +1756,8 @@ if (app.xr) {
     vrLeftInput = null;
     vrRightInput = null;
     vrGrabDragActive = false;
+    vrGrabPickInFlight = false;
+    vrGrabHasPreviousRayPoint = false;
     vrRightDragOccurred = false;
     // Belt-and-suspenders alongside each input source's own "remove"
     // handler (which already destroys its marker) - guarantees none
@@ -1865,31 +1883,67 @@ function updateVrLocomotion(dt) {
     }
   }
 
-  // Right trigger "grab and drag": while held, moving the controller pans
-  // the view by the same amount, in the same direction - like grabbing a
-  // fixed point in the world and dragging it (or yourself) around, as an
-  // alternative to flying with the stick. The first frame of a new press
-  // only records a starting position (no movement yet - there's no
-  // meaningful "previous" position to diff against until the second
-  // frame), so the drag can't start with a spurious jump.
+  // Right trigger "grab and drag": pressing it fires an actual pick along
+  // the pointer ray to find a point on the reef - that point, plus
+  // vrUpAxis as the plane normal (so it's the reef's own "horizontal,"
+  // correctly following a world-flip), defines a plane. Every frame the
+  // trigger stays held, wherever the ray *currently* crosses that same
+  // plane is where the grabbed point needs to end up, so the camera moves
+  // by the difference from last frame - the same "point under the input
+  // stays under the input" idea desktop/mobile planar pan already uses
+  // (see planarPanDrag), just driven by a real ray/plane intersection
+  // instead of an FOV-based approximation, since a ray (unlike a screen
+  // pixel) can point anywhere in 3D rather than always at the same
+  // apparent screen position.
   let grabDragging = false;
   if (vrRightInput && vrRightInput.selecting && vrRightInput.grip) {
-    const currentPos = vrRightInput.getPosition();
-    if (vrGrabDragActive) {
-      vrGrabDelta.copy(currentPos).sub(vrGrabPreviousPos);
-      const dragDistance = vrGrabDelta.length();
-      if (dragDistance > 1e-6) {
-        grabDragging = true;
-        vrGrabAccumulatedDistance += dragDistance;
-        if (vrGrabAccumulatedDistance > VR_GRAB_DRAG_TAP_THRESHOLD) vrRightDragOccurred = true;
-        vrGrabDelta.mulScalar(-1);
-        translateCamera(vrGrabDelta, { moveZoomTarget: true });
-      }
-    } else {
-      vrGrabDragActive = true;
-      vrGrabAccumulatedDistance = 0;
+    if (!vrGrabDragActive && !vrGrabPickInFlight) {
+      vrGrabPickInFlight = true;
+      vrGrabRayOrigin.copy(vrRightInput.getOrigin());
+      vrGrabRayDirection.copy(vrRightInput.getDirection());
+      pickWorldPointFromRay(vrGrabRayOrigin, vrGrabRayDirection).then(hitPoint => {
+        vrGrabPickInFlight = false;
+        // Only actually engage if the trigger is still down by the time
+        // this resolves - a quick tap can release before an async pick
+        // even finishes.
+        if (hitPoint && vrRightInput && vrRightInput.selecting) {
+          vrGrabPlanePoint.copy(hitPoint);
+          worldRoot.getLocalRotation().transformVector(worldUpConst, vrGrabPlaneNormal);
+          vrGrabAccumulatedDistance = 0;
+          vrGrabHasPreviousRayPoint = false;
+          vrGrabDragActive = true;
+        }
+      });
     }
-    vrGrabPreviousPos.copy(currentPos);
+
+    if (vrGrabDragActive) {
+      vrGrabRayOrigin.copy(vrRightInput.getOrigin());
+      vrGrabRayDirection.copy(vrRightInput.getDirection());
+      const denom = vrGrabRayDirection.dot(vrGrabPlaneNormal);
+      // Skip near-parallel rays (denom ~0, unstable/undefined intersection)
+      // and intersections behind the ray origin (t <= 0, e.g. the plane
+      // moved out of reach as the controller turned) - just holds the last
+      // good point until the ray crosses the plane in front of it again.
+      if (Math.abs(denom) > 1e-6) {
+        const t = vrGrabPlaneToOrigin.copy(vrGrabPlanePoint).sub(vrGrabRayOrigin).dot(vrGrabPlaneNormal) / denom;
+        if (t > 0) {
+          vrGrabRayPoint.copy(vrGrabRayDirection).mulScalar(t).add(vrGrabRayOrigin);
+          if (vrGrabHasPreviousRayPoint) {
+            vrGrabDelta.copy(vrGrabRayPoint).sub(vrGrabPreviousRayPoint);
+            const dragDistance = vrGrabDelta.length();
+            if (dragDistance > 1e-6) {
+              grabDragging = true;
+              vrGrabAccumulatedDistance += dragDistance;
+              if (vrGrabAccumulatedDistance > VR_GRAB_DRAG_TAP_THRESHOLD) vrRightDragOccurred = true;
+              vrGrabDelta.mulScalar(-1);
+              translateCamera(vrGrabDelta, { moveZoomTarget: true });
+            }
+          }
+          vrGrabPreviousRayPoint.copy(vrGrabRayPoint);
+          vrGrabHasPreviousRayPoint = true;
+        }
+      }
+    }
   } else {
     vrGrabDragActive = false;
   }
