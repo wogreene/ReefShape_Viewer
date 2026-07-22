@@ -1938,8 +1938,8 @@ function updateVrWorldFlipToggleInput() {
 // dark ring itself starts, only how far the (already fully opaque, past
 // the ring) quad physically extends past it.
 const VR_VIGNETTE_DISTANCE = 0.08;
-const VR_VIGNETTE_INNER_ANGLE_DEG = 20;
-const VR_VIGNETTE_OUTER_ANGLE_DEG = 38;
+const VR_VIGNETTE_INNER_ANGLE_DEG = 12;
+const VR_VIGNETTE_OUTER_ANGLE_DEG = 22;
 const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85;
 // Widened and shortened by the same 1.5x factor, confirmed correct only
 // once actually visible on hardware (fixing the reach issue above was
