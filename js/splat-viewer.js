@@ -1928,17 +1928,31 @@ function updateVrWorldFlipToggleInput() {
 // Sized in terms of half-angle from the view direction, not just "big
 // enough" - the fully-opaque ring starts at ~38 degrees off-center and the
 // fully-clear zone ends at ~20 degrees, chosen to sit comfortably inside a
-// typical headset's half-FOV (~45-55 degrees) while still clearly reaching
-// full black well before the edge of view. An earlier version sized this
-// relative to the *quad's own* radius without checking the resulting
-// angle, which (at this distance/half-size) put the fully-opaque ring
-// beyond even desktop's 75-degree FOV - invisible, since the entire
-// viewport fell inside the "still transparent" zone. Tunable if it reads
-// as too strong/weak or too tight/loose once tried in an actual headset.
+// typical headset's half-FOV while still clearly reaching full black well
+// before the edge of view. VR_VIGNETTE_COVERAGE_ANGLE_DEG is separate from
+// those two and deliberately much wider (confirmed on real hardware that
+// the quad's own physical reach needs to extend well past a headset's
+// actual FOV, or the mask only ever appears in the middle of the view,
+// never reaching the true edges) - the ring angles above stay fixed
+// regardless, so widening coverage alone doesn't change how far out the
+// dark ring itself starts, only how far the (already fully opaque, past
+// the ring) quad physically extends past it.
 const VR_VIGNETTE_DISTANCE = 0.08;
-const VR_VIGNETTE_HALF_SIZE = 0.09;
-const VR_VIGNETTE_INNER_FRACTION = 0.32; // ~20 degrees off-center at the distance/half-size above
-const VR_VIGNETTE_OUTER_FRACTION = 0.7; // ~38 degrees off-center
+const VR_VIGNETTE_INNER_ANGLE_DEG = 20;
+const VR_VIGNETTE_OUTER_ANGLE_DEG = 38;
+const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85;
+// Widened and shortened by the same 1.5x factor, confirmed correct only
+// once actually visible on hardware (fixing the reach issue above was
+// what let this be checked at all) - an oval rather than a circle.
+const VR_VIGNETTE_WIDTH_MULTIPLIER = 1.5;
+const VR_VIGNETTE_HEIGHT_MULTIPLIER = 1 / 1.5;
+const VR_VIGNETTE_BASE_HALF_SIZE = VR_VIGNETTE_DISTANCE * Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
+const VR_VIGNETTE_HALF_WIDTH = VR_VIGNETTE_BASE_HALF_SIZE * VR_VIGNETTE_WIDTH_MULTIPLIER;
+const VR_VIGNETTE_HALF_HEIGHT = VR_VIGNETTE_BASE_HALF_SIZE * VR_VIGNETTE_HEIGHT_MULTIPLIER;
+const VR_VIGNETTE_INNER_FRACTION =
+  Math.tan((VR_VIGNETTE_INNER_ANGLE_DEG * Math.PI) / 180) / Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
+const VR_VIGNETTE_OUTER_FRACTION =
+  Math.tan((VR_VIGNETTE_OUTER_ANGLE_DEG * Math.PI) / 180) / Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
 const VR_VIGNETTE_FADE_SECONDS = 0.25;
 
 let vrVignetteMaterial = null;
@@ -2008,7 +2022,7 @@ function setupVrVignette() {
     vrVignetteMaterial.opacity = 0;
     vrVignetteMaterial.update();
 
-    const geometry = new PlaneGeometry({ halfExtents: new Vec2(VR_VIGNETTE_HALF_SIZE, VR_VIGNETTE_HALF_SIZE) });
+    const geometry = new PlaneGeometry({ halfExtents: new Vec2(VR_VIGNETTE_HALF_WIDTH, VR_VIGNETTE_HALF_HEIGHT) });
     const mesh = Mesh.fromGeometry(app.graphicsDevice, geometry);
     const meshInstance = new MeshInstance(mesh, vrVignetteMaterial);
 
