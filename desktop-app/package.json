@@ -1,0 +1,26 @@
+{
+  "name": "reefshape-vr-viewer",
+  "version": "1.0.0",
+  "description": "Standalone desktop launcher for the ReefShape VR viewer - a thin Electron shell around the live site, so it can be started directly (e.g. via Meta Quest Air Link) instead of through a browser tab.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "org.perryinstitute.reefshape-vr-viewer",
+    "productName": "ReefShape VR Viewer",
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
