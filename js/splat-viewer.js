@@ -40,6 +40,7 @@ import {
   XRTYPE_VR,
   XRSPACE_LOCALFLOOR,
   XRSPACE_LOCAL,
+  XRTARGETRAY_POINTER,
   PROJECTION_ORTHOGRAPHIC,
   PROJECTION_PERSPECTIVE,
   StandardMaterial,
@@ -1420,6 +1421,7 @@ app.on("update", dt => {
     }
     updateVrMenuToggleInput();
     updateVrWorldFlipToggleInput();
+    updateVrControllerVisuals();
   }
   updateVrVignette(dt);
 
@@ -1620,8 +1622,71 @@ const VR_TURN_DEGREES_PER_SECOND = 90;
 let vrLeftInput = null;
 let vrRightInput = null;
 
+// Right trigger "grab and drag" state - see updateVrLocomotion for the
+// actual drag logic and the right-hand "select" handler below for how
+// this suppresses the tap-to-recenter behavior once a real drag happens.
+const VR_GRAB_DRAG_TAP_THRESHOLD = 0.02; // meters of accumulated hand movement before a hold counts as a drag, not a tap
+let vrGrabDragActive = false;
+let vrGrabAccumulatedDistance = 0;
+let vrRightDragOccurred = false;
+const vrGrabPreviousPos = new Vec3();
+const vrGrabDelta = new Vec3();
+
+// --------------------------------------------------
+// VR controller visualization
+//
+// A small white sphere at each handheld controller's grip position, plus
+// a thin white ray in the direction it's pointing - the standard "typical"
+// controller visualization (see PlayCanvas's own xr-hands example), just
+// without the full hand-joint skeleton (this app uses button/stick input,
+// not finger tracking). The ray is drawn fresh every frame via
+// app.drawLine rather than a persistent mesh, same idea as the desktop
+// click marker being a one-off visual rather than always-on geometry.
+// --------------------------------------------------
+const VR_POINTER_RAY_LENGTH = 5;
+const vrControllerMarkerMaterial = new StandardMaterial();
+vrControllerMarkerMaterial.emissive = new Color(1, 1, 1);
+vrControllerMarkerMaterial.emissiveIntensity = 1.5;
+vrControllerMarkerMaterial.diffuse = new Color(0, 0, 0);
+vrControllerMarkerMaterial.useLighting = false;
+vrControllerMarkerMaterial.update();
+
+const vrControllerMarkers = new Map(); // XrInputSource -> marker Entity
+const vrRayEnd = new Vec3();
+
+function createVrControllerMarker(inputSource) {
+  const entity = new Entity("VrControllerMarker");
+  entity.addComponent("render", { type: "sphere", material: vrControllerMarkerMaterial, castShadows: false, receiveShadows: false });
+  entity.setLocalScale(0.04, 0.04, 0.04);
+  entity.enabled = false; // enabled once a grip pose actually becomes available
+  cameraRig.addChild(entity);
+  vrControllerMarkers.set(inputSource, entity);
+}
+
+// Updates every controller marker's pose and draws its pointer ray - only
+// meaningful while an XR session is active, but harmless (map is empty)
+// otherwise. Kept unconditional (unlike updateVrLocomotion) since it's a
+// pure visual with nothing to suspend for the menu or the world-flip
+// transition.
+function updateVrControllerVisuals() {
+  vrControllerMarkers.forEach((entity, inputSource) => {
+    entity.enabled = !!inputSource.grip;
+    if (inputSource.grip) {
+      entity.setLocalPosition(inputSource.getLocalPosition());
+      entity.setLocalRotation(inputSource.getLocalRotation());
+    }
+
+    if (inputSource.targetRayMode === XRTARGETRAY_POINTER) {
+      vrRayEnd.copy(inputSource.getDirection()).mulScalar(VR_POINTER_RAY_LENGTH).add(inputSource.getOrigin());
+      app.drawLine(inputSource.getOrigin(), vrRayEnd, new Color(1, 1, 1));
+    }
+  });
+}
+
 if (app.xr) {
   app.xr.input.on("add", inputSource => {
+    createVrControllerMarker(inputSource);
+
     if (inputSource.handedness === "left") {
       vrLeftInput = inputSource;
       // Left trigger: confirms whichever item the left stick has
@@ -1645,17 +1710,27 @@ if (app.xr) {
       // press-and-release, matching a "point, then commit" click rather
       // than firing the instant the trigger is first touched. Suppressed
       // while the VR menu is open so an incidental right-trigger press
-      // doesn't recenter the camera mid-menu-browsing.
+      // doesn't recenter the camera mid-menu-browsing, and also suppressed
+      // if the trigger-hold was actually used for grab-drag (see
+      // updateVrLocomotion) rather than a quick point-and-click - same
+      // click-vs-drag distinction the desktop mouse already makes via
+      // clickCandidateActive.
       inputSource.on("select", () => {
-        if (!vrMenuScreen.enabled) {
+        if (!vrMenuScreen.enabled && !vrRightDragOccurred) {
           vrTriggerRecenter(inputSource);
         }
+        vrRightDragOccurred = false;
       });
     }
 
     inputSource.on("remove", () => {
       if (vrLeftInput === inputSource) vrLeftInput = null;
       if (vrRightInput === inputSource) vrRightInput = null;
+      const marker = vrControllerMarkers.get(inputSource);
+      if (marker) {
+        marker.destroy();
+        vrControllerMarkers.delete(inputSource);
+      }
     });
   });
 
@@ -1664,6 +1739,13 @@ if (app.xr) {
   app.xr.on("end", () => {
     vrLeftInput = null;
     vrRightInput = null;
+    vrGrabDragActive = false;
+    vrRightDragOccurred = false;
+    // Belt-and-suspenders alongside each input source's own "remove"
+    // handler (which already destroys its marker) - guarantees none
+    // linger if "remove" didn't fire for some reason before "end" did.
+    vrControllerMarkers.forEach(marker => marker.destroy());
+    vrControllerMarkers.clear();
     // Snap off immediately rather than fading - there's nothing to fade
     // against once the session (and its stereo rendering) has ended.
     vrVignetteTargetIntensity = 0;
@@ -1783,9 +1865,38 @@ function updateVrLocomotion(dt) {
     }
   }
 
+  // Right trigger "grab and drag": while held, moving the controller pans
+  // the view by the same amount, in the same direction - like grabbing a
+  // fixed point in the world and dragging it (or yourself) around, as an
+  // alternative to flying with the stick. The first frame of a new press
+  // only records a starting position (no movement yet - there's no
+  // meaningful "previous" position to diff against until the second
+  // frame), so the drag can't start with a spurious jump.
+  let grabDragging = false;
+  if (vrRightInput && vrRightInput.selecting && vrRightInput.grip) {
+    const currentPos = vrRightInput.getPosition();
+    if (vrGrabDragActive) {
+      vrGrabDelta.copy(currentPos).sub(vrGrabPreviousPos);
+      const dragDistance = vrGrabDelta.length();
+      if (dragDistance > 1e-6) {
+        grabDragging = true;
+        vrGrabAccumulatedDistance += dragDistance;
+        if (vrGrabAccumulatedDistance > VR_GRAB_DRAG_TAP_THRESHOLD) vrRightDragOccurred = true;
+        vrGrabDelta.mulScalar(-1);
+        translateCamera(vrGrabDelta, { moveZoomTarget: true });
+      }
+    } else {
+      vrGrabDragActive = true;
+      vrGrabAccumulatedDistance = 0;
+    }
+    vrGrabPreviousPos.copy(currentPos);
+  } else {
+    vrGrabDragActive = false;
+  }
+
   // Comfort vignette (see updateVrVignette) - on for either kind of
   // stick-driven vection, off the instant the stick centers.
-  vrVignetteTargetIntensity = moving || turning ? 1 : 0;
+  vrVignetteTargetIntensity = moving || turning || grabDragging ? 1 : 0;
 }
 
 // --------------------------------------------------
