@@ -158,7 +158,12 @@
   </div>
 
   <!-- Splat viewer logic (PlayCanvas Engine, no build step) -->
-  <script type="module" src="js/splat-viewer.js"></script>
+  <!-- ?v= is a manual cache-buster - bump it (e.g. to the current short
+       commit hash) whenever splat-viewer.js changes. Testing on a real
+       headset repeatedly hit a stale cached copy silently serving old
+       code with no way to tell from the page itself - a plain reload
+       wasn't enough to guarantee a fresh fetch of an ES module. -->
+  <script type="module" src="js/splat-viewer.js?v=ffa4e25"></script>
 
 </body>
 </html>
