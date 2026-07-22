@@ -1924,9 +1924,11 @@ const VR_VIGNETTE_OUTER_FRACTION =
 const VR_VIGNETTE_FADE_SECONDS = 0.25;
 const VR_VIGNETTE_SCALE = 0.01; // world meters per UI unit (1 UI unit = 1cm)
 
+let vrVignetteScreen = null; // repositioned explicitly every frame - see updateVrVignette
 let vrVignetteImage = null; // the Image element itself, whose .opacity drives the fade
 let vrVignetteIntensity = 0; // current, smoothed
 let vrVignetteTargetIntensity = 0; // 1 while actively moving/turning via the stick, 0 otherwise
+const vrVignetteWorldPos = new Vec3();
 
 function createVrVignetteTexture() {
   const size = 256;
@@ -1977,6 +1979,7 @@ function setupVrVignette() {
     const heightUnits = (VR_VIGNETTE_HALF_SIZE * 2) / VR_VIGNETTE_SCALE;
 
     const screen = new Entity("VrVignetteScreen");
+    vrVignetteScreen = screen;
     // referenceResolution === resolution (both default to this same Vec2,
     // since resolution is never set separately) keeps the Screen's internal
     // auto-scale factor at exactly 1, so widthUnits/heightUnits below map to
@@ -1984,12 +1987,19 @@ function setupVrVignette() {
     // scaling to account for.
     screen.addComponent("screen", { screenSpace: false, referenceResolution: new Vec2(widthUnits, widthUnits) });
     screen.setLocalScale(VR_VIGNETTE_SCALE, VR_VIGNETTE_SCALE, VR_VIGNETTE_SCALE);
-    // No lookAt/rotate needed (contrast the VR menu, which points at a
-    // moving target) - parented straight in front of the camera with
-    // identity local rotation, an Image element's content-facing +Z axis
-    // already ends up pointing right back at the camera.
-    screen.setLocalPosition(0, 0, -VR_VIGNETTE_DISTANCE);
-    camera.addChild(screen);
+    // A root-level entity, repositioned explicitly every frame (see
+    // updateVrVignette) from camera.getPosition()/camera.getRotation(),
+    // rather than a child of `camera` relying on ordinary parent-child
+    // transform inheritance to follow the headset. That's the same
+    // approach the VR menu already uses successfully (it repositions
+    // itself from camera.getPosition()/camera.forward once, at open time) -
+    // a version of the vignette parented directly to camera went through
+    // two full rewrites (a raw mesh, then a Screen+Element identical to
+    // this one) and stayed invisible on real hardware both times despite
+    // every piece of debug state checking out correct, which points at
+    // something about child-of-camera specifically, not the rendering
+    // mechanism itself.
+    app.root.addChild(screen);
 
     const image = new Entity("VrVignetteImage");
     vrVignetteImage = image;
@@ -2020,6 +2030,14 @@ function updateVrVignette(dt) {
   if (!vrVignetteImage) return;
   vrVignetteIntensity += (vrVignetteTargetIntensity - vrVignetteIntensity) * Math.min(1, dt / VR_VIGNETTE_FADE_SECONDS);
   vrVignetteImage.element.opacity = vrVignetteIntensity;
+
+  // Explicit every frame, not a one-time parent-child setup - see
+  // vrVignetteScreen's declaration for why.
+  if (camera.camera) {
+    vrVignetteWorldPos.copy(camera.getPosition()).addScaled(camera.forward, VR_VIGNETTE_DISTANCE);
+    vrVignetteScreen.setPosition(vrVignetteWorldPos);
+    vrVignetteScreen.setRotation(camera.getRotation());
+  }
 }
 
 // A permanently-existing, never-visibly-rendered camera used solely to turn
