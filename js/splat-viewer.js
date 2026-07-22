@@ -1980,12 +1980,18 @@ function setupVrVignette() {
 
     const screen = new Entity("VrVignetteScreen");
     vrVignetteScreen = screen;
-    // referenceResolution === resolution (both default to this same Vec2,
-    // since resolution is never set separately) keeps the Screen's internal
-    // auto-scale factor at exactly 1, so widthUnits/heightUnits below map to
-    // world meters through nothing but VR_VIGNETTE_SCALE - no extra implicit
-    // scaling to account for.
-    screen.addComponent("screen", { screenSpace: false, referenceResolution: new Vec2(widthUnits, widthUnits) });
+    // ScreenComponent's own resolution defaults to a fixed (640, 320) -
+    // it does NOT auto-match whatever referenceResolution is passed in,
+    // despite how that reads. Left alone, that mismatch feeds into an
+    // internal auto-scale factor (comparing resolution against
+    // referenceResolution) that silently shrank this panel to a fraction
+    // of its intended size. Setting resolution explicitly to the exact
+    // same Vec2 as referenceResolution keeps that auto-scale factor at
+    // exactly 1, so widthUnits/heightUnits below map to world meters
+    // through nothing but VR_VIGNETTE_SCALE.
+    const vignetteResolution = new Vec2(widthUnits, heightUnits);
+    screen.addComponent("screen", { screenSpace: false, referenceResolution: vignetteResolution });
+    screen.screen.resolution = vignetteResolution;
     screen.setLocalScale(VR_VIGNETTE_SCALE, VR_VIGNETTE_SCALE, VR_VIGNETTE_SCALE);
     // A root-level entity, repositioned explicitly every frame (see
     // updateVrVignette) from camera.getPosition()/camera.getRotation(),
@@ -2806,8 +2812,11 @@ window.__debug = {
       elementLayers: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.layers.slice(),
       screenLocalPosition: vrVignetteImage && vrVignetteImage.parent && vrVignetteImage.parent.getLocalPosition().clone(),
       worldPosition: vrVignetteImage && vrVignetteImage.getPosition().clone(),
+      screenScale: vrVignetteScreen && vrVignetteScreen.screen && vrVignetteScreen.screen.scale,
       width: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.width,
       height: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.height,
+      calculatedWidth: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.calculatedWidth,
+      calculatedHeight: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.calculatedHeight,
       opacity: vrVignetteImage && vrVignetteImage.element && vrVignetteImage.element.opacity
     })
   }
