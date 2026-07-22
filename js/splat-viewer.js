@@ -270,6 +270,27 @@ if (app.scene.gsplat) {
   }
 }
 
+// Ambient reef-sounds audio - VR only. Starts the instant an XR session
+// begins and stops the instant it ends, never played in the flat desktop/
+// mobile viewer. A plain HTML5 Audio element rather than PlayCanvas's own
+// sound system, since nothing else here needs SoundComponentSystem
+// registered just for one looping background track. Starting playback
+// from the XR "start" event (itself only ever fired downstream of the
+// user's own "Enter VR" click) satisfies the browser autoplay policy's
+// user-gesture requirement.
+if (app.xr) {
+  const vrAmbientAudio = new Audio("audio/reef-sounds.m4a");
+  vrAmbientAudio.loop = true;
+  vrAmbientAudio.volume = 0.5;
+  app.xr.on("start", () => {
+    vrAmbientAudio.currentTime = 0;
+    vrAmbientAudio.play().catch(e => console.warn("VR ambient audio failed to start:", e));
+  });
+  app.xr.on("end", () => {
+    vrAmbientAudio.pause();
+  });
+}
+
 // The camera sits under a "rig" entity: our orbit/pan/zoom/WASD logic moves
 // and orients the rig, while the camera itself stays at local identity. In a
 // WebXR session the engine drives the camera's local position/rotation
