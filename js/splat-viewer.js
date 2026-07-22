@@ -1944,8 +1944,8 @@ const VR_VIGNETTE_COVERAGE_ANGLE_DEG = 85;
 // Widened and shortened by the same 1.5x factor, confirmed correct only
 // once actually visible on hardware (fixing the reach issue above was
 // what let this be checked at all) - an oval rather than a circle.
-const VR_VIGNETTE_WIDTH_MULTIPLIER = 1.3;
-const VR_VIGNETTE_HEIGHT_MULTIPLIER = 1 / 1.5;
+const VR_VIGNETTE_WIDTH_MULTIPLIER = 1.2;
+const VR_VIGNETTE_HEIGHT_MULTIPLIER = 1 / 1.3;
 const VR_VIGNETTE_BASE_HALF_SIZE = VR_VIGNETTE_DISTANCE * Math.tan((VR_VIGNETTE_COVERAGE_ANGLE_DEG * Math.PI) / 180);
 const VR_VIGNETTE_HALF_WIDTH = VR_VIGNETTE_BASE_HALF_SIZE * VR_VIGNETTE_WIDTH_MULTIPLIER;
 const VR_VIGNETTE_HALF_HEIGHT = VR_VIGNETTE_BASE_HALF_SIZE * VR_VIGNETTE_HEIGHT_MULTIPLIER;
