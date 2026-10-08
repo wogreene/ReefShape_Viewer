@@ -1,29 +1,29 @@
 // Will Greene 12/18/2025
 // js/viewer-ol.js
 
-import OLMap from "https://esm.sh/ol@latest/Map.js";
-import View from "https://esm.sh/ol@latest/View.js";
-import WebGLTileLayer from "https://esm.sh/ol@latest/layer/WebGLTile.js";
-import GeoTIFF from "https://esm.sh/ol@latest/source/GeoTIFF.js";
-import ScaleLine from "https://esm.sh/ol@latest/control/ScaleLine.js";
-import { defaults as defaultControls } from "https://esm.sh/ol@latest/control/defaults.js";
-import { defaults as defaultInteractions } from "https://esm.sh/ol@latest/interaction/defaults.js";
-import DragRotate from "https://esm.sh/ol@latest/interaction/DragRotate.js";
-import { platformModifierKeyOnly } from "https://esm.sh/ol@latest/events/condition.js";
-
-// Overlays (vector)
-import VectorLayer from "https://esm.sh/ol@latest/layer/Vector.js";
-import VectorSource from "https://esm.sh/ol@latest/source/Vector.js";
-import GeoJSON from "https://esm.sh/ol@latest/format/GeoJSON.js";
-import Style from "https://esm.sh/ol@latest/style/Style.js";
-import Stroke from "https://esm.sh/ol@latest/style/Stroke.js";
-import Fill from "https://esm.sh/ol@latest/style/Fill.js";
-
-// Popup
-import Overlay from "https://esm.sh/ol@latest/Overlay.js";
-
-// Geodesic area fallback
-import { getArea as getGeodesicArea } from "https://esm.sh/ol@latest/sphere.js";
+// OpenLayers comes from the single-file global build loaded by a plain
+// <script> tag in viewer.html (window.ol), not per-module ES imports. The
+// previous per-module imports from esm.sh (ol@latest/Map.js, View.js, ...)
+// broke when esm.sh started serving Map and View as separate, self-contained
+// builds - each with its own copy of the View class - so Map's
+// `options.view instanceof View` check failed and it fell through to
+// treating the view as a Promise ("t.view.then is not a function"). esm.sh
+// was also intermittently 500ing on modules it hadn't already built (its
+// storage was full). One bundle = one copy of every class, served from a
+// pinned jsDelivr URL.
+const {
+  Map: OLMap,
+  View,
+  Overlay,
+  layer: { WebGLTile: WebGLTileLayer, Vector: VectorLayer },
+  source: { GeoTIFF, Vector: VectorSource },
+  control: { ScaleLine, defaults: { defaults: defaultControls } = {} },
+  interaction: { DragRotate, defaults: { defaults: defaultInteractions } = {} },
+  events: { condition: { platformModifierKeyOnly } },
+  format: { GeoJSON },
+  style: { Style, Stroke, Fill },
+  sphere: { getArea: getGeodesicArea }
+} = globalThis.ol;
 
 // IMPORTANT: JS Map, not OpenLayers Map
 const JSMap = globalThis.Map;
